@@ -43,6 +43,9 @@
   const $ = (sel, raiz = document) => raiz.querySelector(sel);
   const $$ = (sel, raiz = document) => Array.from(raiz.querySelectorAll(sel));
 
+  /** Minúsculas y sin acentos, para buscar "maria" y encontrar "MARÍA". */
+  function sinAcentos(t) { return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
+
   function esc(v) {
     return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }

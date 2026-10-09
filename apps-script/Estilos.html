@@ -27,7 +27,9 @@
 
   /* ── Fondo animado: auroras + rejilla tipo negatoscopio ── */
   .fondo-app { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
-  .aurora { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .55; will-change: transform; }
+  /* Sin filter: blur(): los degradados radiales ya son suaves y el desenfoque obligaba a
+     redibujar el fondo completo en cada cuadro (la página bajaba a ~12 fps al escribir). */
+  .aurora { position: absolute; border-radius: 50%; opacity: .5; will-change: transform; }
   .dark .aurora { opacity: .35; }
   .aurora.a1 { width: 46vw; height: 46vw; background: radial-gradient(circle, #00B2E3 0%, transparent 70%); top: -14vw; left: -10vw; }
   .aurora.a2 { width: 40vw; height: 40vw; background: radial-gradient(circle, #10567F 0%, transparent 70%); bottom: -16vw; right: -8vw; }
@@ -40,6 +42,7 @@
     -webkit-mask-image: radial-gradient(ellipse at center, #000 30%, transparent 80%);
   }
   .escaner {
+    will-change: transform;
     position: absolute; left: 0; right: 0; height: 160px; top: -160px;
     background: linear-gradient(180deg, transparent, rgba(0, 178, 227, .10) 70%, rgba(0, 178, 227, .35) 99%, transparent);
   }

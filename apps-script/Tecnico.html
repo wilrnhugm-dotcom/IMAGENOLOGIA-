@@ -152,6 +152,7 @@
     <!-- Tarjetas -->
     <main class="flex-1 px-3 sm:px-5 py-5">
       <div id="grid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5 relative"></div>
+      <p id="mas" class="text-center text-xs font-semibold tenue pt-6"></p>
       <div id="vacio" class="hidden flex-col items-center justify-center text-center py-20">
         <div class="relative w-40 h-40">
           <div class="absolute inset-0 rounded-full bg-emerald-400/20 blur-2xl"></div>
@@ -227,7 +228,8 @@
       inicio: Date.now(),
       citaAusencia: null,
       motivo: null,
-      listo: false
+      listo: false,
+      limite: 30          // tarjetas dibujadas (crece al bajar)
     };
     const grid = $('#grid');
 
@@ -311,6 +313,7 @@
         return cargarAgenda();
       }
       grid.innerHTML = '';
+      S.limite = PAGINA;
       S.listo = true;
       render();
     }
@@ -344,9 +347,9 @@
     let esperaBusqueda = null;
     $('#buscador').addEventListener('input', (e) => {
       clearTimeout(esperaBusqueda);
-      esperaBusqueda = setTimeout(() => { S.texto = e.target.value.trim().toLowerCase(); render(); }, 220);
+      esperaBusqueda = setTimeout(() => { S.texto = sinAcentos(e.target.value.trim()); S.limite = PAGINA; render(); }, 220);
     });
-    $('#orden').addEventListener('change', (e) => { S.orden = e.target.value; render(); });
+    $('#orden').addEventListener('change', (e) => { S.orden = e.target.value; S.limite = PAGINA; render(); });
     document.addEventListener('keydown', (e) => {
       if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') { e.preventDefault(); $('#buscador').focus(); }
       if (e.key === 'Escape') { if ($('#modal-ausencia').classList.contains('abierto')) cerrarAusencia(); cerrarCajon(); }
@@ -356,6 +359,7 @@
       S.sala = b.dataset.sala;
       try { localStorage.setItem('ugm-sala', S.sala); } catch (err) {}
       $('#sala-tecnico').textContent = S.sala === 'TODAS' ? 'Todas las salas' : 'Sala ' + S.sala;
+      S.limite = PAGINA;
       render();
     });
 
@@ -374,7 +378,7 @@
       return todas
         .filter(esPendiente)
         .filter(c => S.sala === 'TODAS' || c.modalidad === S.sala)
-        .filter(c => !S.texto || [c.expediente, c.paciente, c.estudio, c.ubicacion, c.equipo].join(' ').toLowerCase().includes(S.texto))
+        .filter(c => !S.texto || sinAcentos([c.expediente, c.paciente, c.estudio, c.ubicacion, c.equipo].join(' ')).includes(S.texto))
         .sort((a, b) => {
           if (S.orden === 'nombre') return a.paciente.localeCompare(b.paciente);
           if (S.orden === 'modalidad') return a.modalidad.localeCompare(b.modalidad) || (minutosDeHora(a.hora) ?? 9999) - (minutosDeHora(b.hora) ?? 9999);
@@ -393,79 +397,75 @@
       requestAnimationFrame(() => { repintadoPendiente = false; pintar(); });
     }
 
+    // Solo se dibujan PAGINA tarjetas; al acercarse al final de la página se agregan más.
+    // Así la pantalla maneja ~30 tarjetas en vez de 200+ y escribir/buscar va fluido.
+    const PAGINA = 30;
+
     function pintar() {
       const todas = citas();
-      const mapa = {}; todas.forEach(c => { mapa[c.id] = c; });
       pintarResumen(todas);
       pintarChips(todas);
       pintarMisRegistros(todas);
 
-      const lista = visibles(todas);
+      const total = visibles(todas);
+      const lista = total.slice(0, S.limite);
+      S.totalVisibles = total.length;
       const ids = lista.map(c => c.id), idsSet = new Set(ids);
       const ahora = new Date(), minAhora = ahora.getHours() * 60 + ahora.getMinutes();
-      const siguienteId = S.orden === 'hora' ? lista.find(c => c.estado !== ESTADO.REVISANDO)?.id : null;
+      const siguienteId = S.orden === 'hora' ? total.find(c => c.estado !== ESTADO.REVISANDO)?.id : null;
 
-      const enPantalla = $$('.tarjeta', grid).filter(el => !el.dataset.saliendo && el.style.display !== 'none').map(el => el.dataset.id);
+      const enPantalla = $$('.tarjeta', grid).filter(el => !el.dataset.saliendo).map(el => el.dataset.id);
       const enPantallaSet = new Set(enPantalla);
-      // Caso normal al registrar un paciente: solo SALEN tarjetas y el resto conserva su orden.
-      const soloSalidas = enPantalla.length > 0 && ids.every(id => enPantallaSet.has(id)) && enPantalla.filter(id => idsSet.has(id)).join('|') === ids.join('|');
+      const quedan = enPantalla.filter(id => idsSet.has(id));
+      // Caso normal (registrar, búsqueda que reduce, "cargar más"): las que siguen conservan
+      // su orden; algunas salen y, si acaso, entran nuevas al final.
+      const incremental = enPantalla.length > 0 && ids.slice(0, quedan.length).join('|') === quedan.join('|');
 
-      if (soloSalidas) {
-        lista.forEach(c => actualizarTarjeta(tarjeta(c.id), c, minAhora, c.id === siguienteId));
+      if (incremental) {
+        lista.slice(0, quedan.length).forEach(c => actualizarTarjeta(tarjeta(c.id), c, minAhora, c.id === siguienteId));
         const salientes = enPantalla.filter(id => !idsSet.has(id)).map(tarjeta).filter(Boolean);
+        const entrantes = lista.slice(quedan.length).map(c => {
+          const viejo = tarjeta(c.id); if (viejo) viejo.remove(); // p. ej. "deshacer" mientras salía
+          const el = crearTarjeta(c);
+          actualizarTarjeta(el, c, minAhora, c.id === siguienteId);
+          grid.appendChild(el);
+          return el;
+        });
+        if (entrantes.length) gsap.fromTo(entrantes, { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: .4, stagger: .02, delay: salientes.length ? .3 : 0, ease: 'power3.out', clearProps: 'opacity,transform' });
         if (salientes.length) sacarTarjetas(salientes);
-      } else if (soloMostrarOcultar(lista, ids, idsSet, mapa, minAhora, siguienteId, enPantallaSet)) {
-        // Búsqueda o filtro: las tarjetas ya están en orden, solo se muestran u ocultan.
       } else {
-        // Carga inicial, nuevo orden o tarjetas nuevas: se reconstruye el orden en un solo paso.
+        // Carga inicial, búsqueda que amplía, filtro u orden nuevo: se arma de una vez.
         const frag = document.createDocumentFragment();
         const nuevas = [];
         lista.forEach(c => {
           let el = tarjeta(c.id);
+          if (el && el.dataset.saliendo) { el.remove(); el = null; }
           if (!el) el = crearTarjeta(c);
           if (!enPantallaSet.has(c.id)) nuevas.push(el);
-          el.style.display = '';
           actualizarTarjeta(el, c, minAhora, c.id === siguienteId);
           frag.appendChild(el);
         });
-        $$('.tarjeta', grid).forEach(el => {
-          const c = mapa[el.dataset.id];
-          if (!c || !esPendiente(c)) el.remove();
-          else { el.style.display = 'none'; delete el.dataset.saliendo; gsap.set(el, { clearProps: 'opacity,transform' }); frag.appendChild(el); }
-        });
+        $$('.tarjeta', grid).forEach(el => el.remove()); // las que ya no corresponden
         grid.appendChild(frag);
-        // Animación de entrada solo para las primeras tarjetas (las que se ven).
-        // (si solo volvieron pocas, p. ej. al deshacer, se animan solo esas).
-        const primeras = enPantalla.length && nuevas.length <= 6 ? nuevas : Array.from(grid.children).filter(el => el.style.display !== 'none').slice(0, 12);
-        gsap.fromTo(primeras, { opacity: 0, y: 34, scale: .94 }, { opacity: 1, y: 0, scale: 1, duration: .5, stagger: .035, ease: 'back.out(1.4)', clearProps: 'opacity,transform' });
+        const primeras = enPantalla.length && nuevas.length <= 6 ? nuevas : lista.slice(0, 12).map(c => tarjeta(c.id)).filter(Boolean);
+        if (primeras.length) gsap.fromTo(primeras, { opacity: 0, y: 30, scale: .95 }, { opacity: 1, y: 0, scale: 1, duration: .45, stagger: .03, ease: 'back.out(1.4)', clearProps: 'opacity,transform' });
       }
-      mostrarVacio(lista.length === 0, todas);
+      $('#mas').textContent = total.length > lista.length ? `Mostrando ${lista.length} de ${total.length} · desliza para ver más` : '';
+      mostrarVacio(total.length === 0, todas);
+      requestAnimationFrame(revisarCargarMas);
     }
 
-    /** Si todas las tarjetas ya existen en el orden correcto, solo cambia su visibilidad (sin mover el DOM). */
-    function soloMostrarOcultar(lista, ids, idsSet, mapa, minAhora, siguienteId, enPantallaSet) {
-      const todasEl = $$('.tarjeta', grid);
-      const enDom = todasEl.map(el => el.dataset.id).filter(id => idsSet.has(id));
-      if (enDom.length !== ids.length || enDom.join('|') !== ids.join('|')) return false;
-      const nuevas = [];
-      todasEl.forEach(el => {
-        const id = el.dataset.id;
-        if (idsSet.has(id)) {
-          if (el.style.display === 'none' || el.dataset.saliendo) {
-            if (el.dataset.saliendo) { delete el.dataset.saliendo; gsap.set(el, { clearProps: 'opacity,transform' }); }
-            el.style.display = '';
-            if (!enPantallaSet.has(id)) nuevas.push(el);
-          }
-          actualizarTarjeta(el, mapa[id], minAhora, id === siguienteId);
-        } else {
-          const c = mapa[id];
-          if (!c || !esPendiente(c)) el.remove(); else el.style.display = 'none';
-        }
-      });
-      const primeras = (nuevas.length <= 6 ? nuevas : lista.slice(0, 12).map(c => tarjeta(c.id))).filter(Boolean);
-      gsap.fromTo(primeras, { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: .4, stagger: .03, ease: 'power3.out', clearProps: 'opacity,transform' });
-      return true;
+    /** Si el final de la lista está cerca de la pantalla, agrega otra tanda de tarjetas. */
+    function revisarCargarMas() {
+      if (!S.listo || S.limite >= (S.totalVisibles || 0)) return;
+      if (innerHeight + scrollY > document.documentElement.scrollHeight - 900) { S.limite += PAGINA; render(); }
     }
+    let esperaScroll = false;
+    addEventListener('scroll', () => {
+      if (esperaScroll) return;
+      esperaScroll = true;
+      requestAnimationFrame(() => { esperaScroll = false; revisarCargarMas(); });
+    }, { passive: true });
 
     /** Anima la salida de tarjetas y el reacomodo SOLO de las que están cerca de la pantalla. */
     function sacarTarjetas(salientes) {
@@ -475,17 +475,12 @@
         onComplete: () => {
           const alto = innerHeight;
           const cercanas = $$('.tarjeta', grid).filter(el => {
-            if (el.dataset.saliendo || el.style.display === 'none') return false;
+            if (el.dataset.saliendo) return false;
             const r = el.getBoundingClientRect();
             return r.bottom > -150 && r.top < alto + 150;
           });
           const estado = Flip.getState(cercanas);
-          const mapa = {}; citas().forEach(c => { mapa[c.id] = c; });
-          salientes.forEach(el => {
-            const c = mapa[el.dataset.id];
-            if (c && esPendiente(c)) { delete el.dataset.saliendo; gsap.set(el, { clearProps: 'opacity,transform,boxShadow' }); el.style.display = 'none'; }
-            else el.remove();
-          });
+          salientes.forEach(el => { if (el.dataset.saliendo) el.remove(); });
           Flip.from(estado, { duration: .42, ease: 'power3.out' });
         }
       });

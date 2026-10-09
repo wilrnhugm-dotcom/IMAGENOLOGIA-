@@ -572,7 +572,7 @@
       const op = '<option value="">Todas las modalidades</option>' + Object.keys(MODALIDADES).map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
       $('#ag-modalidad').innerHTML = op; $('#rp-modalidad').innerHTML = op;
     }
-    $('#ag-buscar').addEventListener('input', e => { S.agTexto = e.target.value.trim().toLowerCase(); pintarAgenda(citas(), true); });
+    $('#ag-buscar').addEventListener('input', e => { S.agTexto = sinAcentos(e.target.value.trim()); pintarAgenda(citas(), true); });
     $('#ag-modalidad').addEventListener('change', e => { S.agModalidad = e.target.value; pintarAgenda(citas(), true); });
     $('#ag-estados').addEventListener('click', e => {
       const b = e.target.closest('[data-estado]'); if (!b) return;
@@ -594,7 +594,7 @@
       const filas = todas
         .filter(c => !S.agEstado || (S.agEstado === ESTADO.PENDIENTE ? !procesada(c) : c.estado === S.agEstado))
         .filter(c => !S.agModalidad || c.modalidad === S.agModalidad)
-        .filter(c => !S.agTexto || [c.expediente, c.paciente, c.estudio, c.tecnico, c.ubicacion, c.motivo].join(' ').toLowerCase().includes(S.agTexto))
+        .filter(c => !S.agTexto || sinAcentos([c.expediente, c.paciente, c.estudio, c.tecnico, c.ubicacion, c.motivo].join(' ')).includes(S.agTexto))
         .sort((a, b) => (minutosDeHora(a.hora) ?? 9999) - (minutosDeHora(b.hora) ?? 9999));
       $('#ag-cuerpo').innerHTML = filas.length ? filas.map(c => {
         const m = modalidad(c.modalidad);
