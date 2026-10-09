@@ -217,6 +217,11 @@
 
   <?!= include('Comun') ?>
   <script>
+    // Comprobación: si el archivo "Comun" falta o se pegó otro contenido, decirlo claramente.
+    if (typeof SESION === 'undefined' || typeof reproducirIntro === 'undefined') {
+      throw new Error('El archivo "Comun" falta, es una versión vieja o tiene otro contenido. Vuelve a pegar 06_Comun.txt en Comun (debe empezar con <script>).');
+    }
+
     // Flip (reacomodo animado) es opcional: si el CDN no responde, la app funciona igual.
     const hayFlip = typeof Flip !== 'undefined';
     if (hayFlip) gsap.registerPlugin(Flip);

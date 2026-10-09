@@ -433,6 +433,11 @@
 
   <?!= include('Comun') ?>
   <script>
+    // Comprobación: si el archivo "Comun" falta o se pegó otro contenido, decirlo claramente.
+    if (typeof SESION === 'undefined' || typeof reproducirIntro === 'undefined') {
+      throw new Error('El archivo "Comun" falta, es una versión vieja o tiene otro contenido. Vuelve a pegar 06_Comun.txt en Comun (debe empezar con <script>).');
+    }
+
     /* ── Estado ───────────────────────────────────────────────────────── */
     const S = { agenda: [], vivo: {}, logs: [], conexiones: {}, vista: 'panel', agEstado: '', agModalidad: '', agTexto: '', reporte: null, rpPestana: 'Ausente', carga: null };
     const VISTAS = {

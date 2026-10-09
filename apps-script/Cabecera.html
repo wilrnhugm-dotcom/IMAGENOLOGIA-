@@ -8,16 +8,22 @@
   /* Si algo falla al cargar (una librería que no descargó, un archivo mal pegado…),
      se muestra un aviso con el error en vez de quedarse la pantalla congelada. */
   (function () {
-    var mostrados = 0;
+    var errores = [];
     function avisar(texto) {
-      if (mostrados++ > 2) return;
+      if (errores.length >= 5 || errores.indexOf(texto) !== -1) return;
+      errores.push(texto);
       var mostrar = function () {
         var intro = document.getElementById('intro'); if (intro) intro.remove();
-        var d = document.createElement('div');
-        d.setAttribute('style', 'position:fixed;left:16px;right:16px;bottom:16px;z-index:9999;background:#7f1d1d;color:#fff;font:14px/1.45 system-ui,sans-serif;padding:14px 16px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.5)');
-        d.innerHTML = '<b>Ocurrió un error al cargar la página.</b> Recarga con Ctrl+F5; si sigue, envía una captura de este aviso a soporte.<br><code style="font-size:12px;opacity:.85"></code>';
-        d.querySelector('code').textContent = texto;
-        document.body.appendChild(d);
+        var d = document.getElementById('aviso-error');
+        if (!d) {
+          d = document.createElement('div');
+          d.id = 'aviso-error';
+          d.setAttribute('style', 'position:fixed;left:16px;right:16px;bottom:16px;z-index:9999;background:#7f1d1d;color:#fff;font:14px/1.45 system-ui,sans-serif;padding:14px 16px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.5)');
+          d.innerHTML = '<b>Ocurrió un error al cargar la página.</b> Recarga con Ctrl+F5; si sigue, envía una captura de este aviso a soporte.<ol style="margin:6px 0 0 18px;font:12px/1.5 monospace;opacity:.9"></ol>';
+          document.body.appendChild(d);
+        }
+        var ol = d.querySelector('ol'); ol.innerHTML = '';
+        errores.forEach(function (t) { var li = document.createElement('li'); li.textContent = t; ol.appendChild(li); });
       };
       document.body ? mostrar() : document.addEventListener('DOMContentLoaded', mostrar);
     }
