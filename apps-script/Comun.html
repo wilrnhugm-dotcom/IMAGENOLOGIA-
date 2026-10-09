@@ -47,8 +47,29 @@
     return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  function icono(nombre, clases = 'w-4 h-4') { return `<i data-lucide="${nombre}" class="${clases}"></i>`; }
-  function refrescarIconos() { if (window.lucide) lucide.createIcons({ attrs: { 'stroke-width': 2 } }); }
+  /* Iconos: el SVG de cada icono se genera una sola vez y se reutiliza como texto.
+     (lucide.createIcons() vuelve a reemplazar TODOS los iconos de la página en cada
+     llamada; con 200+ tarjetas eso trababa la pantalla en cada clic). */
+  const _iconos = {};
+  function svgIcono(nombre) {
+    if (_iconos[nombre] !== undefined) return _iconos[nombre];
+    const pascal = nombre.replace(/(^|-)(\w)/g, (_, __, c) => c.toUpperCase());
+    const nodo = window.lucide && lucide.icons[pascal];
+    if (!nodo) return (_iconos[nombre] = null);
+    const attrs = (o) => Object.keys(o).map(k => `${k}="${o[k]}"`).join(' ');
+    return (_iconos[nombre] = [attrs(nodo[1]), (nodo[2] || []).map(([t, a]) => `<${t} ${attrs(a)}/>`).join('')]);
+  }
+  function icono(nombre, clases = 'w-4 h-4') {
+    const s = svgIcono(nombre);
+    return s ? `<svg ${s[0]} class="lucide ${clases}" aria-hidden="true">${s[1]}</svg>` : `<i data-lucide="${nombre}" class="${clases}"></i>`;
+  }
+  /** Convierte solo los <i data-lucide> que aún no son SVG (los del HTML fijo). */
+  function refrescarIconos(raiz = document) {
+    raiz.querySelectorAll('i[data-lucide]').forEach(el => {
+      const s = svgIcono(el.getAttribute('data-lucide'));
+      if (s) el.outerHTML = `<svg ${s[0]} class="lucide ${el.getAttribute('class') || ''}" aria-hidden="true">${s[1]}</svg>`;
+    });
+  }
 
   /** Firebase no admite . # $ [ ] / en las claves. */
   function claveSegura(texto) { return String(texto).trim().replace(/[.#$\[\]\/]/g, '_').slice(0, 60) || 'anon'; }

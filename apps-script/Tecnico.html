@@ -7,7 +7,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/Flip.min.js"></script>
   <?!= include('Estilos') ?>
   <style>
-    .tarjeta { transform-style: preserve-3d; }
+    .tarjeta { transform-style: preserve-3d; content-visibility: auto; contain-intrinsic-size: auto 380px; }
     /* Sin backdrop-filter en cada tarjeta: con 30+ tarjetas pesa mucho en iPads. */
     .tarjeta.vidrio { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(255, 255, 255, .9); }
     .dark .tarjeta.vidrio { background: rgba(11, 26, 44, .88); }
@@ -354,7 +354,15 @@
       render();
     });
 
-    function citas() { return S.agenda.map(c => estadoVivo(c, S.vivo)); }
+    // Registros hechos en este iPad que Firebase aún no confirma: se aplican al instante
+    // para que la tarjeta salga sin esperar a la red.
+    const optimistas = {};
+    function citas() {
+      return S.agenda.map(c => {
+        const v = estadoVivo(c, S.vivo);
+        return optimistas[c.id] ? { ...v, ...optimistas[c.id] } : v;
+      });
+    }
     const esPendiente = (c) => c.estado === ESTADO.PENDIENTE || c.estado === ESTADO.REVISANDO || !c.estado;
 
     function visibles(todas) {
@@ -372,42 +380,83 @@
     /* ── Render ───────────────────────────────────────────────────────── */
     const tarjeta = (id) => grid.querySelector(`.tarjeta[data-id="${CSS.escape(id)}"]`);
 
+    // Varias llamadas seguidas se agrupan en un solo repintado por cuadro de animación.
+    let repintadoPendiente = false;
     function render() {
-      if (!S.listo) return;
+      if (!S.listo || repintadoPendiente) return;
+      repintadoPendiente = true;
+      requestAnimationFrame(() => { repintadoPendiente = false; pintar(); });
+    }
+
+    function pintar() {
       const todas = citas();
+      const mapa = {}; todas.forEach(c => { mapa[c.id] = c; });
       pintarResumen(todas);
       pintarChips(todas);
       pintarMisRegistros(todas);
 
       const lista = visibles(todas);
-      const ids = new Set(lista.map(c => c.id));
-      const estado = Flip.getState(grid.querySelectorAll('.tarjeta'));
+      const ids = lista.map(c => c.id), idsSet = new Set(ids);
       const ahora = new Date(), minAhora = ahora.getHours() * 60 + ahora.getMinutes();
-      const siguienteId = lista.find(c => c.estado !== ESTADO.REVISANDO)?.id;
+      const siguienteId = S.orden === 'hora' ? lista.find(c => c.estado !== ESTADO.REVISANDO)?.id : null;
 
-      lista.forEach(c => {
-        let el = tarjeta(c.id);
-        if (!el) el = crearTarjeta(c);
-        actualizarTarjeta(el, c, minAhora, c.id === siguienteId && S.orden === 'hora');
-        el.style.display = '';
-        grid.appendChild(el);
-      });
-      const salientes = [];
-      grid.querySelectorAll('.tarjeta').forEach(el => {
-        if (!ids.has(el.dataset.id)) { el.style.display = 'none'; salientes.push(el); }
-      });
+      const enPantalla = $$('.tarjeta', grid).filter(el => !el.dataset.saliendo && el.style.display !== 'none').map(el => el.dataset.id);
+      const enPantallaSet = new Set(enPantalla);
+      // Caso normal al registrar un paciente: solo SALEN tarjetas y el resto conserva su orden.
+      const soloSalidas = enPantalla.length > 0 && ids.every(id => enPantallaSet.has(id)) && enPantalla.filter(id => idsSet.has(id)).join('|') === ids.join('|');
 
-      Flip.from(estado, {
-        duration: .6, ease: 'power3.inOut', absolute: true, stagger: .015, simple: true,
-        onEnter: els => gsap.fromTo(els, { opacity: 0, y: 40, scale: .9, rotateX: -12 }, { opacity: 1, y: 0, scale: 1, rotateX: 0, duration: .65, stagger: .04, ease: 'back.out(1.4)' }),
-        onLeave: els => gsap.to(els, { opacity: 0, scale: .85, duration: .35, ease: 'power2.in' }),
-        onComplete: () => salientes.forEach(el => {
-          const c = todas.find(x => x.id === el.dataset.id);
-          if (!c || !esPendiente(c)) el.remove(); // procesadas: fuera del DOM
-        })
-      });
-      refrescarIconos();
+      if (soloSalidas) {
+        lista.forEach(c => actualizarTarjeta(tarjeta(c.id), c, minAhora, c.id === siguienteId));
+        const salientes = enPantalla.filter(id => !idsSet.has(id)).map(tarjeta).filter(Boolean);
+        if (salientes.length) sacarTarjetas(salientes);
+      } else {
+        // Carga inicial, búsqueda, filtro u orden: se reconstruye el orden en un solo paso.
+        const frag = document.createDocumentFragment();
+        const nuevas = [];
+        lista.forEach(c => {
+          let el = tarjeta(c.id);
+          if (!el) el = crearTarjeta(c);
+          if (!enPantallaSet.has(c.id)) nuevas.push(el);
+          el.style.display = '';
+          actualizarTarjeta(el, c, minAhora, c.id === siguienteId);
+          frag.appendChild(el);
+        });
+        $$('.tarjeta', grid).forEach(el => {
+          const c = mapa[el.dataset.id];
+          if (!c || !esPendiente(c)) el.remove();
+          else { el.style.display = 'none'; delete el.dataset.saliendo; gsap.set(el, { clearProps: 'opacity,transform' }); frag.appendChild(el); }
+        });
+        grid.appendChild(frag);
+        // Animación de entrada solo para las primeras tarjetas (las que se ven).
+        // (si solo volvieron pocas, p. ej. al deshacer, se animan solo esas).
+        const primeras = enPantalla.length && nuevas.length <= 6 ? nuevas : Array.from(grid.children).filter(el => el.style.display !== 'none').slice(0, 12);
+        gsap.fromTo(primeras, { opacity: 0, y: 34, scale: .94 }, { opacity: 1, y: 0, scale: 1, duration: .5, stagger: .035, ease: 'back.out(1.4)', clearProps: 'opacity,transform' });
+      }
       mostrarVacio(lista.length === 0, todas);
+    }
+
+    /** Anima la salida de tarjetas y el reacomodo SOLO de las que están cerca de la pantalla. */
+    function sacarTarjetas(salientes) {
+      salientes.forEach(el => { el.dataset.saliendo = '1'; });
+      gsap.to(salientes, {
+        opacity: 0, scale: .86, y: -14, duration: .26, ease: 'power2.in',
+        onComplete: () => {
+          const alto = innerHeight;
+          const cercanas = $$('.tarjeta', grid).filter(el => {
+            if (el.dataset.saliendo || el.style.display === 'none') return false;
+            const r = el.getBoundingClientRect();
+            return r.bottom > -150 && r.top < alto + 150;
+          });
+          const estado = Flip.getState(cercanas);
+          const mapa = {}; citas().forEach(c => { mapa[c.id] = c; });
+          salientes.forEach(el => {
+            const c = mapa[el.dataset.id];
+            if (c && esPendiente(c)) { delete el.dataset.saliendo; gsap.set(el, { clearProps: 'opacity,transform,boxShadow' }); el.style.display = 'none'; }
+            else el.remove();
+          });
+          Flip.from(estado, { duration: .42, ease: 'power3.out' });
+        }
+      });
     }
 
     function crearTarjeta(c) {
@@ -445,15 +494,21 @@
     }
 
     function actualizarTarjeta(el, c, minAhora, esSiguiente) {
+      if (!el) return;
       const bloqueada = c.estado === ESTADO.REVISANDO && c.bloqueado_por && c.bloqueado_por !== S.nombre;
+      const min = minutosDeHora(c.hora);
+      const tiempo = min === null ? '' : minAhora - min > 20 ? 'tarde' : Math.abs(minAhora - min) <= 20 ? 'ahora' : '';
+      const firma = [bloqueada ? c.bloqueado_por : '', esSiguiente ? 1 : 0, tiempo].join('|');
+      if (el.dataset.firma === firma) return;
+      el.dataset.firma = firma;
       el.classList.toggle('bloqueada', !!bloqueada);
       if (bloqueada) el.querySelector('.quien').textContent = c.bloqueado_por;
       el.classList.toggle('siguiente', esSiguiente);
       el.querySelector('.etiqueta-siguiente').classList.toggle('hidden', !esSiguiente);
-      const min = minutosDeHora(c.hora), hora = el.querySelector('.hora');
+      const hora = el.querySelector('.hora');
       hora.classList.remove('text-amber-500', 'text-cyan-500', '!border-amber-500/50', '!border-cyan-500/60');
-      if (min !== null && minAhora - min > 20) hora.classList.add('text-amber-500', '!border-amber-500/50');
-      else if (min !== null && Math.abs(minAhora - min) <= 20) hora.classList.add('text-cyan-500', '!border-cyan-500/60');
+      if (tiempo === 'tarde') hora.classList.add('text-amber-500', '!border-amber-500/50');
+      else if (tiempo === 'ahora') hora.classList.add('text-cyan-500', '!border-cyan-500/60');
     }
 
     function pintarResumen(todas) {
@@ -514,9 +569,11 @@
     async function registrar(c, estado, motivo, comentario) {
       const ref = db.ref('pacientes_hoy/' + c.id);
       const el = tarjeta(c.id);
-      if (el) {
-        gsap.to(el, { boxShadow: `0 0 0 3px ${estado === ESTADO.ASISTIO ? '#10B981' : '#F43F5E'}, 0 30px 60px -20px ${estado === ESTADO.ASISTIO ? '#10B981' : '#F43F5E'}`, y: -10, duration: .25 });
-      }
+      const color = estado === ESTADO.ASISTIO ? '#10B981' : '#F43F5E';
+      if (el) el.style.boxShadow = `0 0 0 3px ${color}, 0 24px 50px -18px ${color}`;
+      // Respuesta inmediata: la tarjeta sale ya; si Firebase lo rechaza, vuelve.
+      optimistas[c.id] = { estado, tecnico: S.nombre, motivo: motivo || '', comentario: comentario || '', ts: Date.now() };
+      render();
       let resultado;
       try {
         resultado = await ref.transaction(actual => {
@@ -525,15 +582,19 @@
           return { estado, tecnico: S.nombre, timestamp: Date.now(), motivo: motivo || '', comentario: comentario || '', modalidad: c.modalidad, expediente: c.expediente };
         });
       } catch (err) {
+        delete optimistas[c.id];
+        if (el) el.style.boxShadow = '';
+        render();
         toast('Sin conexión: no se pudo registrar. Intenta de nuevo.', 'error');
-        if (el) gsap.to(el, { boxShadow: 'none', y: 0, duration: .3 });
         return;
       }
+      delete optimistas[c.id];
       ref.onDisconnect().cancel();
       if (!resultado.committed) {
         const v = resultado.snapshot.val() || {};
+        if (el) el.style.boxShadow = '';
+        render();
         toast(`Este paciente ya fue registrado por ${v.tecnico || v.bloqueado_por || 'otro técnico'}.`, 'aviso');
-        if (el) gsap.to(el, { boxShadow: 'none', y: 0, duration: .3 });
         return;
       }
 
@@ -574,27 +635,31 @@
     });
     $('#aus-comentario').addEventListener('input', (e) => { $('#aus-cont').textContent = e.target.value.length; });
 
-    async function abrirAusencia(c) {
-      const ref = db.ref('pacientes_hoy/' + c.id);
-      let r;
-      try {
-        r = await ref.transaction(actual => {
-          if (actual && (actual.estado === ESTADO.ASISTIO || actual.estado === ESTADO.AUSENTE)) return;
-          if (actual && actual.estado === ESTADO.REVISANDO && actual.bloqueado_por && actual.bloqueado_por !== S.nombre) return;
-          return { estado: ESTADO.REVISANDO, bloqueado_por: S.nombre, desde: Date.now() };
-        });
-      } catch (err) { return toast('Sin conexión con el servidor en vivo.', 'error'); }
-      if (!r.committed) { const v = r.snapshot.val() || {}; return toast(`${v.bloqueado_por || v.tecnico || 'Otro técnico'} ya está trabajando con este paciente.`, 'aviso'); }
-      ref.onDisconnect().set({ estado: ESTADO.PENDIENTE, liberado: true }); // si se cae la conexión, se libera
-
+    function abrirAusencia(c) {
+      // La ventana abre al instante; el bloqueo en Firebase se toma en segundo plano.
       S.citaAusencia = c; S.motivo = null;
       $('#aus-paciente').textContent = c.paciente;
       $('#aus-detalle').textContent = `Exp. ${c.expediente} · ${c.estudio} · ${c.hora || ''}`;
       $('#aus-comentario').value = ''; $('#aus-cont').textContent = '0'; $('#aus-error').textContent = ''; $('#aus-oblig').textContent = '(opcional)';
       $$('#lista-motivos .motivo').forEach(x => x.classList.remove('activo'));
       $('#modal-ausencia').classList.add('abierto');
-      gsap.fromTo('#caja-ausencia', { y: 60, opacity: 0, scale: .94 }, { y: 0, opacity: 1, scale: 1, duration: .55, ease: 'expo.out' });
-      gsap.fromTo('#lista-motivos .motivo', { y: 14, opacity: 0 }, { y: 0, opacity: 1, duration: .4, stagger: .03, delay: .1, ease: 'power3.out', clearProps: 'transform,opacity' });
+      gsap.fromTo('#caja-ausencia', { y: 60, opacity: 0, scale: .94 }, { y: 0, opacity: 1, scale: 1, duration: .5, ease: 'expo.out' });
+      gsap.fromTo('#lista-motivos .motivo', { y: 14, opacity: 0 }, { y: 0, opacity: 1, duration: .35, stagger: .025, delay: .08, ease: 'power3.out', clearProps: 'transform,opacity' });
+
+      const ref = db.ref('pacientes_hoy/' + c.id);
+      ref.transaction(actual => {
+        if (actual && (actual.estado === ESTADO.ASISTIO || actual.estado === ESTADO.AUSENTE)) return;
+        if (actual && actual.estado === ESTADO.REVISANDO && actual.bloqueado_por && actual.bloqueado_por !== S.nombre) return;
+        return { estado: ESTADO.REVISANDO, bloqueado_por: S.nombre, desde: Date.now() };
+      }).then(r => {
+        if (S.citaAusencia !== c) return; // ya se confirmó o canceló
+        if (!r.committed) {
+          const v = r.snapshot.val() || {};
+          cerrarAusencia(false);
+          return toast(`${v.bloqueado_por || v.tecnico || 'Otro técnico'} ya está trabajando con este paciente.`, 'aviso');
+        }
+        ref.onDisconnect().set({ estado: ESTADO.PENDIENTE, liberado: true }); // si se cae la conexión, se libera
+      }).catch(() => toast('Sin conexión con el servidor en vivo.', 'error'));
     }
 
     function cerrarAusencia(liberar = true) {
@@ -628,6 +693,7 @@
         .sort((a, b) => (b.ts || 0) - (a.ts || 0));
       const k = $('#mis-cuenta');
       k.textContent = mios.length; k.classList.toggle('hidden', !mios.length);
+      if (!S.cajonAbierto) return;
       $('#lista-mis').innerHTML = mios.length ? mios.map(c => {
         const ok = c.estado === ESTADO.ASISTIO;
         return `<div class="vidrio rounded-2xl p-4 flex gap-3 items-start">
@@ -652,13 +718,15 @@
     });
 
     $('#btn-mis').addEventListener('click', () => {
-      refrescarIconos();
+      S.cajonAbierto = true;
+      pintarMisRegistros(citas());
       $('#velo-cajon').classList.remove('hidden');
       gsap.fromTo('#velo-cajon', { opacity: 0 }, { opacity: 1, duration: .3 });
       gsap.to('#cajon', { xPercent: 0, duration: .55, ease: 'expo.out' });
       gsap.fromTo('#lista-mis > div', { x: 40, opacity: 0 }, { x: 0, opacity: 1, stagger: .04, duration: .4, delay: .15, clearProps: 'transform,opacity' });
     });
     function cerrarCajon() {
+      S.cajonAbierto = false;
       gsap.to('#cajon', { xPercent: 105, duration: .4, ease: 'power3.in' });
       gsap.to('#velo-cajon', { opacity: 0, duration: .3, onComplete: () => $('#velo-cajon').classList.add('hidden') });
     }

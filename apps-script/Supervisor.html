@@ -372,7 +372,7 @@
       const todas = citas();
       pintarKpis(todas);
       pintarGraficas(todas);
-      pintarAgenda(todas);
+      if (S.vista === 'agenda') pintarAgenda(todas); // la tabla solo se arma si está a la vista
       $('#n-bloqueos').textContent = todas.filter(c => c.estado === ESTADO.REVISANDO).length;
     }
 
@@ -394,6 +394,7 @@
         gsap.fromTo(nueva, { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: .45, ease: 'power3.out' });
         gsap.from(nueva.querySelectorAll(':scope > div, :scope > .grid > div'), { y: 30, opacity: 0, duration: .5, stagger: .05, ease: 'power3.out', clearProps: 'all' });
         if (vista === 'panel') Object.values(G).forEach(g => g.resize());
+        if (vista === 'agenda') pintarAgenda(citas(), true);
       } });
       gsap.fromTo('#titulo-vista', { opacity: 0, x: -14 }, { opacity: 1, x: 0, duration: .4 });
       $('#titulo-vista').textContent = VISTAS[vista][0];
@@ -411,6 +412,8 @@
       const lista = Object.values(S.conexiones);
       $('#cuenta-tecnicos').textContent = lista.length;
       const todas = citas();
+      const antes = $('#lista-tecnicos').dataset.nombres, ahora = lista.map(t => t.nombre).join('|');
+      $('#lista-tecnicos').dataset.nombres = ahora;
       $('#lista-tecnicos').innerHTML = lista.length ? lista.map(t => {
         const hechos = todas.filter(c => c.tecnico === t.nombre && procesada(c)).length;
         return `<li class="flex items-center gap-3 p-2 rounded-xl hover:bg-cyan-500/5">
@@ -419,7 +422,7 @@
           <span class="num text-xs font-bold text-cyan-500">${hechos}</span>
         </li>`;
       }).join('') : '<li class="text-xs tenue py-2">Ningún técnico conectado.</li>';
-      gsap.from('#lista-tecnicos li', { x: -12, opacity: 0, stagger: .04, duration: .35 });
+      if (antes !== ahora) gsap.fromTo('#lista-tecnicos li', { x: -12, opacity: 0 }, { x: 0, opacity: 1, stagger: .04, duration: .35 });
     }
 
     /* ── KPIs ─────────────────────────────────────────────────────────── */
