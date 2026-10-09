@@ -4,8 +4,8 @@
   <base target="_top">
   <title>Radar Imagenología · UGM</title>
   <?!= include('Cabecera') ?>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js" data-opcional></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" data-opcional></script>
   <?!= include('Estilos') ?>
   <style>
     .nav-item { display: flex; align-items: center; gap: .8rem; padding: .8rem 1rem; border-radius: 1rem; font-weight: 600; font-size: .9rem; color: var(--tenue); position: relative; transition: color .2s ease; width: 100%; }
@@ -645,6 +645,8 @@
       return { texto: oscuro ? '#8BA3B8' : '#5B7186', rejilla: oscuro ? 'rgba(94,208,240,.08)' : 'rgba(16,86,127,.08)', fondo: oscuro ? '#0B1A2E' : '#ffffff' };
     }
     function prepararGraficas() {
+      // Las gráficas son opcionales: si la librería no descargó, el resto del panel funciona.
+      if (typeof Chart === 'undefined') { setTimeout(() => toast('No se pudieron cargar las gráficas. Recarga la página con Ctrl+F5.', 'aviso', { duracion: 9000 }), 4000); return; }
       const t = coloresTema();
       Chart.defaults.font.family = 'Inter, sans-serif';
       Chart.defaults.font.weight = 600;
@@ -722,6 +724,7 @@
     }
 
     function pintarGraficas(todas) {
+      if (!G.estado) return;
       const n = e => todas.filter(c => c.estado === e).length;
       const revision = n(ESTADO.REVISANDO);
       G.estado.data.datasets[0].data = [n(ESTADO.ASISTIO), n(ESTADO.AUSENTE), todas.length - n(ESTADO.ASISTIO) - n(ESTADO.AUSENTE) - revision, revision];
@@ -1039,6 +1042,7 @@
 
     function leerExcel(archivo) {
       gsap.to('#icono-carga', { rotation: 360, duration: .8, ease: 'power2.inOut' });
+      if (typeof XLSX === 'undefined') return toast('No se pudo cargar el lector de Excel. Recarga la página con Ctrl+F5.', 'error', { duracion: 9000 });
       const lector = new FileReader();
       lector.onload = (e) => {
         try {

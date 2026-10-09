@@ -4,6 +4,33 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 
+<script>
+  /* Si algo falla al cargar (una librería que no descargó, un archivo mal pegado…),
+     se muestra un aviso con el error en vez de quedarse la pantalla congelada. */
+  (function () {
+    var mostrados = 0;
+    function avisar(texto) {
+      if (mostrados++ > 2) return;
+      var mostrar = function () {
+        var intro = document.getElementById('intro'); if (intro) intro.remove();
+        var d = document.createElement('div');
+        d.setAttribute('style', 'position:fixed;left:16px;right:16px;bottom:16px;z-index:9999;background:#7f1d1d;color:#fff;font:14px/1.45 system-ui,sans-serif;padding:14px 16px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.5)');
+        d.innerHTML = '<b>Ocurrió un error al cargar la página.</b> Recarga con Ctrl+F5; si sigue, envía una captura de este aviso a soporte.<br><code style="font-size:12px;opacity:.85"></code>';
+        d.querySelector('code').textContent = texto;
+        document.body.appendChild(d);
+      };
+      document.body ? mostrar() : document.addEventListener('DOMContentLoaded', mostrar);
+    }
+    window.addEventListener('error', function (e) {
+      if (e.target && e.target !== window) {
+        // Recurso que no descargó: solo importa si es un script obligatorio.
+        if (e.target.tagName === 'SCRIPT' && !e.target.hasAttribute('data-opcional')) avisar('No se pudo descargar: ' + e.target.src);
+        return;
+      }
+      avisar((e.message || 'Error') + (e.lineno ? ' (línea ' + e.lineno + ')' : ''));
+    }, true);
+  })();
+</script>
 <script src="https://cdn.tailwindcss.com/3.4.16"></script>
 <script>
   tailwind.config = {

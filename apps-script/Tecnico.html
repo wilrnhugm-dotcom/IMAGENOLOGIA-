@@ -4,7 +4,7 @@
   <base target="_top">
   <title>Control de Pacientes · Imagenología</title>
   <?!= include('Cabecera') ?>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/Flip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/Flip.min.js" data-opcional></script>
   <?!= include('Estilos') ?>
   <style>
     .tarjeta { transform-style: preserve-3d; content-visibility: auto; contain-intrinsic-size: auto 380px; }
@@ -217,7 +217,9 @@
 
   <?!= include('Comun') ?>
   <script>
-    gsap.registerPlugin(Flip);
+    // Flip (reacomodo animado) es opcional: si el CDN no responde, la app funciona igual.
+    const hayFlip = typeof Flip !== 'undefined';
+    if (hayFlip) gsap.registerPlugin(Flip);
     gsap.set('#cajon', { xPercent: 105 });
 
     /* ── Estado ───────────────────────────────────────────────────────── */
@@ -526,6 +528,7 @@
       gsap.to(salientes, {
         opacity: 0, scale: .86, y: -14, duration: .26, ease: 'power2.in',
         onComplete: () => {
+          if (!hayFlip) { salientes.forEach(el => { if (el.dataset.saliendo) el.remove(); }); return; }
           const alto = innerHeight;
           const cercanas = $$('.tarjeta', grid).filter(el => {
             if (el.dataset.saliendo) return false;
