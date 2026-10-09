@@ -88,9 +88,12 @@
   .btn-fantasma:hover { background: rgba(0, 178, 227, .08); }
   .btn-peligro { background: linear-gradient(135deg, #F43F5E, #BE123C); color: #fff; box-shadow: 0 10px 25px -10px rgba(244, 63, 94, .8); }
   .btn-exito { background: linear-gradient(135deg, #10B981, #047857); color: #fff; box-shadow: 0 10px 25px -10px rgba(16, 185, 129, .8); }
-  .btn .brillo { position: absolute; inset: 0; background: linear-gradient(120deg, transparent 30%, rgba(255, 255, 255, .45) 50%, transparent 70%); transform: translateX(-120%); pointer-events: none; }
+  .btn .brillo { position: absolute; inset: 0; background: linear-gradient(120deg, transparent 30%, rgba(255, 255, 255, .45) 50%, transparent 70%); transform: translateX(-120%); pointer-events: none; animation: brilloBoton .8s ease-in-out forwards; }
+  @keyframes brilloBoton { to { transform: translateX(120%); } }
 
-  .ripple { position: absolute; border-radius: 50%; background: rgba(255, 255, 255, .45); transform: scale(0); pointer-events: none; }
+  /* La onda termina siempre invisible (forwards), aunque el botón se redibuje a mitad de animación. */
+  .ripple { position: absolute; border-radius: 50%; background: rgba(255, 255, 255, .45); transform: scale(0); pointer-events: none; animation: ondaBoton .6s ease-out forwards; }
+  @keyframes ondaBoton { to { transform: scale(1); opacity: 0; } }
 
   /* ── Chips ── */
   .chip {
