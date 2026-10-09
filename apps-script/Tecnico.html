@@ -340,7 +340,12 @@
     }
 
     /* ── Filtros ──────────────────────────────────────────────────────── */
-    $('#buscador').addEventListener('input', (e) => { S.texto = e.target.value.trim().toLowerCase(); render(); });
+    // Se busca cuando el técnico deja de escribir (no en cada letra).
+    let esperaBusqueda = null;
+    $('#buscador').addEventListener('input', (e) => {
+      clearTimeout(esperaBusqueda);
+      esperaBusqueda = setTimeout(() => { S.texto = e.target.value.trim().toLowerCase(); render(); }, 220);
+    });
     $('#orden').addEventListener('change', (e) => { S.orden = e.target.value; render(); });
     document.addEventListener('keydown', (e) => {
       if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') { e.preventDefault(); $('#buscador').focus(); }
@@ -409,8 +414,10 @@
         lista.forEach(c => actualizarTarjeta(tarjeta(c.id), c, minAhora, c.id === siguienteId));
         const salientes = enPantalla.filter(id => !idsSet.has(id)).map(tarjeta).filter(Boolean);
         if (salientes.length) sacarTarjetas(salientes);
+      } else if (soloMostrarOcultar(lista, ids, idsSet, mapa, minAhora, siguienteId, enPantallaSet)) {
+        // Búsqueda o filtro: las tarjetas ya están en orden, solo se muestran u ocultan.
       } else {
-        // Carga inicial, búsqueda, filtro u orden: se reconstruye el orden en un solo paso.
+        // Carga inicial, nuevo orden o tarjetas nuevas: se reconstruye el orden en un solo paso.
         const frag = document.createDocumentFragment();
         const nuevas = [];
         lista.forEach(c => {
@@ -433,6 +440,31 @@
         gsap.fromTo(primeras, { opacity: 0, y: 34, scale: .94 }, { opacity: 1, y: 0, scale: 1, duration: .5, stagger: .035, ease: 'back.out(1.4)', clearProps: 'opacity,transform' });
       }
       mostrarVacio(lista.length === 0, todas);
+    }
+
+    /** Si todas las tarjetas ya existen en el orden correcto, solo cambia su visibilidad (sin mover el DOM). */
+    function soloMostrarOcultar(lista, ids, idsSet, mapa, minAhora, siguienteId, enPantallaSet) {
+      const todasEl = $$('.tarjeta', grid);
+      const enDom = todasEl.map(el => el.dataset.id).filter(id => idsSet.has(id));
+      if (enDom.length !== ids.length || enDom.join('|') !== ids.join('|')) return false;
+      const nuevas = [];
+      todasEl.forEach(el => {
+        const id = el.dataset.id;
+        if (idsSet.has(id)) {
+          if (el.style.display === 'none' || el.dataset.saliendo) {
+            if (el.dataset.saliendo) { delete el.dataset.saliendo; gsap.set(el, { clearProps: 'opacity,transform' }); }
+            el.style.display = '';
+            if (!enPantallaSet.has(id)) nuevas.push(el);
+          }
+          actualizarTarjeta(el, mapa[id], minAhora, id === siguienteId);
+        } else {
+          const c = mapa[id];
+          if (!c || !esPendiente(c)) el.remove(); else el.style.display = 'none';
+        }
+      });
+      const primeras = (nuevas.length <= 6 ? nuevas : lista.slice(0, 12).map(c => tarjeta(c.id))).filter(Boolean);
+      gsap.fromTo(primeras, { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: .4, stagger: .03, ease: 'power3.out', clearProps: 'opacity,transform' });
+      return true;
     }
 
     /** Anima la salida de tarjetas y el reacomodo SOLO de las que están cerca de la pantalla. */
