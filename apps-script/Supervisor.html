@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <title>Radar Imagenología · UGM</title>
+  <?!= include('Cabecera') ?>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <?!= include('Estilos') ?>
+  <style>
+    .nav-item { display: flex; align-items: center; gap: .8rem; padding: .8rem 1rem; border-radius: 1rem; font-weight: 600; font-size: .9rem; color: var(--tenue); position: relative; transition: color .2s ease; width: 100%; }
+    .nav-item:hover { color: var(--texto); }
+    .nav-item.activo { color: #fff; }
+    #nav-indicador { position: absolute; left: 0; right: 0; border-radius: 1rem; background: linear-gradient(135deg, #00B2E3, #10567F); box-shadow: 0 10px 30px -10px rgba(0, 178, 227, .8); z-index: 0; }
+    .nav-item > * { position: relative; z-index: 1; }
+    .vista { display: none; }
+    .vista.activa { display: block; }
+    .kpi-card { position: relative; overflow: hidden; }
+    .kpi-card .halo { position: absolute; width: 140px; height: 140px; border-radius: 50%; right: -40px; top: -40px; filter: blur(40px); opacity: .35; }
+    .tabla th { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: var(--tenue); font-weight: 800; text-align: left; padding: .8rem 1rem; position: sticky; top: 0; background: var(--tarjeta); backdrop-filter: blur(12px); z-index: 1; }
+    .tabla td { padding: .75rem 1rem; border-top: 1px solid var(--borde); font-size: .85rem; vertical-align: top; }
+    .tabla tbody tr { transition: background .2s ease; }
+    .tabla tbody tr:hover { background: rgba(0, 178, 227, .06); }
+    .zona-carga { border: 2px dashed rgba(0, 178, 227, .35); border-radius: 1.5rem; transition: all .25s ease; }
+    .zona-carga.encima { border-color: #00B2E3; background: rgba(0, 178, 227, .08); transform: scale(1.01); }
+    .evento { position: relative; padding-left: 2.25rem; }
+    .evento::before { content: ''; position: absolute; left: .7rem; top: 0; bottom: -1rem; width: 2px; background: linear-gradient(var(--borde), transparent); }
+    .evento .nodo { position: absolute; left: 0; top: .2rem; width: 1.5rem; height: 1.5rem; border-radius: 999px; display: grid; place-items: center; color: #fff; }
+    .pestana { padding: .55rem 1rem; border-radius: .8rem; font-weight: 700; font-size: .8rem; color: var(--tenue); }
+    .pestana.activa { background: rgba(0, 178, 227, .14); color: #00B2E3; }
+    .lienzo { position: relative; height: 280px; }
+  </style>
+</head>
+<body class="min-h-screen overflow-x-hidden">
+  <?!= incluirPlantilla('Intro') ?>
+  <?!= include('Fondo') ?>
+
+  <img id="logo-impresion" src="<?!= include('LogoHospital') ?>" class="hidden" alt="">
+  <img id="escudo-impresion" src="<?!= include('Escudo') ?>" class="hidden" alt="">
+
+  <div id="app" class="relative z-10 flex min-h-screen opacity-0">
+
+    <!-- ═══════════════ BARRA LATERAL ═══════════════ -->
+    <aside id="lateral" class="hidden lg:flex flex-col w-72 shrink-0 p-4 sticky top-0 h-screen">
+      <div class="vidrio rounded-3xl flex flex-col h-full p-5">
+        <div class="pb-5 border-b" style="border-color:var(--borde)">
+          <img src="<?!= include('LogoHospital') ?>" alt="Nuevo Hospital Rosales" class="w-full dark:hidden">
+          <img src="<?!= include('LogoHospitalBlanco') ?>" alt="Nuevo Hospital Rosales" class="w-full hidden dark:block">
+          <div class="mt-4 flex items-center gap-2">
+            <span class="insignia bg-cyan-500/15 text-cyan-500"><i data-lucide="radar" class="w-3.5 h-3.5"></i> Radar UGM</span>
+            <span class="text-[11px] tenue font-bold tracking-widest uppercase">Imagenología</span>
+          </div>
+        </div>
+
+        <nav id="nav" class="relative mt-5 space-y-1">
+          <div id="nav-indicador"></div>
+          <button class="nav-item activo" data-vista="panel"><i data-lucide="layout-dashboard" class="w-5 h-5"></i><span>Panel en vivo</span></button>
+          <button class="nav-item" data-vista="agenda"><i data-lucide="list-checks" class="w-5 h-5"></i><span>Agenda del turno</span></button>
+          <button class="nav-item" data-vista="actividad"><i data-lucide="activity" class="w-5 h-5"></i><span>Actividad</span></button>
+          <button class="nav-item" data-vista="reportes"><i data-lucide="file-chart-column" class="w-5 h-5"></i><span>Reportes</span></button>
+          <button class="nav-item" data-vista="admin"><i data-lucide="settings-2" class="w-5 h-5"></i><span>Administración</span></button>
+        </nav>
+
+        <div class="mt-auto pt-5 border-t" style="border-color:var(--borde)">
+          <div class="flex items-center justify-between mb-3">
+            <p class="text-[11px] font-black uppercase tracking-widest tenue">Técnicos en línea</p>
+            <span id="cuenta-tecnicos" class="insignia bg-emerald-500/15 text-emerald-500 num">0</span>
+          </div>
+          <ul id="lista-tecnicos" class="space-y-2 max-h-56 overflow-y-auto pr-1"></ul>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ═══════════════ CONTENIDO ═══════════════ -->
+    <div class="flex-1 min-w-0 flex flex-col">
+      <header id="cabecera" class="sticky top-0 z-30 p-4 pb-0">
+        <div class="vidrio rounded-2xl px-5 py-3 flex flex-wrap items-center gap-3">
+          <div class="lg:hidden w-full flex items-center justify-between">
+            <img src="<?!= include('LogoHospital') ?>" alt="" class="h-9 dark:hidden"><img src="<?!= include('LogoHospitalBlanco') ?>" alt="" class="h-9 hidden dark:block">
+            <select id="nav-movil" class="campo !w-auto !py-2 text-sm font-bold">
+              <option value="panel">Panel en vivo</option><option value="agenda">Agenda</option><option value="actividad">Actividad</option><option value="reportes">Reportes</option><option value="admin">Administración</option>
+            </select>
+          </div>
+          <div>
+            <h1 id="titulo-vista" class="font-display font-black text-xl sm:text-2xl leading-tight">Panel en vivo</h1>
+            <p id="subtitulo-vista" class="text-xs tenue font-semibold">Asistencia de pacientes en tiempo real</p>
+          </div>
+          <div class="ml-auto flex items-center gap-2">
+            <div class="hidden sm:flex items-center gap-2 px-3 py-2 rounded-full border" style="border-color:var(--borde)">
+              <span id="punto-conexion" class="punto-vivo"></span>
+              <span id="txt-conexion" class="text-[11px] font-black uppercase tracking-wider">En vivo</span>
+              <span class="w-px h-4 bg-current opacity-20"></span>
+              <span id="reloj" class="num text-xs font-bold"></span>
+            </div>
+            <button onclick="alternarTema()" class="btn btn-fantasma !p-2.5 !rounded-full" title="Cambiar tema">
+              <i data-lucide="sun" class="w-5 h-5 hidden dark:block"></i><i data-lucide="moon" class="w-5 h-5 dark:hidden"></i>
+            </button>
+            <button id="btn-reporte-rapido" class="btn btn-primario"><i data-lucide="file-down" class="w-5 h-5"></i><span class="hidden sm:inline">Generar reporte</span></button>
+          </div>
+        </div>
+      </header>
+
+      <main class="flex-1 p-4">
+
+        <!-- ─────────────── PANEL EN VIVO ─────────────── -->
+        <section id="vista-panel" class="vista activa space-y-4">
+          <div class="grid grid-cols-2 xl:grid-cols-[1.35fr_1fr_1fr_1fr_1fr] gap-4">
+            <div class="vidrio kpi-card rounded-3xl p-5 col-span-2 xl:col-span-1 flex items-center gap-4">
+              <div class="halo bg-cyan-400"></div>
+              <svg class="w-20 h-20 -rotate-90 shrink-0" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="42" fill="none" stroke="currentColor" stroke-width="10" class="text-cyan-500/15"/>
+                <circle id="anillo-efectividad" cx="50" cy="50" r="42" fill="none" stroke="url(#gEf)" stroke-width="10" stroke-linecap="round" stroke-dasharray="263.9" stroke-dashoffset="263.9"/>
+                <defs><linearGradient id="gEf" x1="0" x2="1"><stop offset="0" stop-color="#00B2E3"/><stop offset="1" stop-color="#10B981"/></linearGradient></defs>
+              </svg>
+              <div class="relative">
+                <p class="text-[11px] font-black uppercase tracking-widest tenue">Asistencia</p>
+                <p class="font-display font-black text-4xl"><span id="k-efectividad" class="num">0</span><span class="text-xl tenue">%</span></p>
+                <p class="text-xs tenue">de los registrados</p>
+              </div>
+            </div>
+            <div class="vidrio kpi-card rounded-3xl p-5"><div class="halo bg-sky-500"></div>
+              <div class="relative flex items-start justify-between"><p class="text-[11px] font-black uppercase tracking-widest tenue">Agenda total</p><span class="w-10 h-10 rounded-xl bg-sky-500/15 text-sky-500 grid place-items-center"><i data-lucide="users" class="w-5 h-5"></i></span></div>
+              <p id="k-total" class="relative num font-display font-black text-4xl mt-2">0</p>
+              <p class="relative text-xs tenue mt-1"><span id="k-modalidades" class="num font-bold">0</span> modalidades</p>
+            </div>
+            <div class="vidrio kpi-card rounded-3xl p-5"><div class="halo bg-emerald-500"></div>
+              <div class="relative flex items-start justify-between"><p class="text-[11px] font-black uppercase tracking-widest tenue">Asistieron</p><span class="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-500 grid place-items-center"><i data-lucide="user-round-check" class="w-5 h-5"></i></span></div>
+              <p id="k-asistio" class="relative num font-display font-black text-4xl mt-2 text-emerald-500">0</p>
+              <div class="relative h-1.5 rounded-full bg-emerald-500/15 mt-3 overflow-hidden"><div id="b-asistio" class="h-full w-0 bg-emerald-500 rounded-full"></div></div>
+            </div>
+            <div class="vidrio kpi-card rounded-3xl p-5"><div class="halo bg-rose-500"></div>
+              <div class="relative flex items-start justify-between"><p class="text-[11px] font-black uppercase tracking-widest tenue">No asistieron</p><span class="w-10 h-10 rounded-xl bg-rose-500/15 text-rose-500 grid place-items-center"><i data-lucide="user-round-x" class="w-5 h-5"></i></span></div>
+              <p id="k-ausente" class="relative num font-display font-black text-4xl mt-2 text-rose-500">0</p>
+              <div class="relative h-1.5 rounded-full bg-rose-500/15 mt-3 overflow-hidden"><div id="b-ausente" class="h-full w-0 bg-rose-500 rounded-full"></div></div>
+            </div>
+            <div class="vidrio kpi-card rounded-3xl p-5"><div class="halo bg-amber-500"></div>
+              <div class="relative flex items-start justify-between"><p class="text-[11px] font-black uppercase tracking-widest tenue">Pendientes</p><span class="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-500 grid place-items-center"><i data-lucide="hourglass" class="w-5 h-5"></i></span></div>
+              <p id="k-pendiente" class="relative num font-display font-black text-4xl mt-2 text-amber-500">0</p>
+              <p class="relative text-xs tenue mt-1"><span id="k-revision" class="num font-bold">0</span> en revisión ahora</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <div class="vidrio rounded-3xl p-5 tarjeta-grafica">
+              <div class="flex items-center gap-2 mb-3"><i data-lucide="chart-pie" class="w-5 h-5 text-cyan-500"></i><h3 class="font-display font-extrabold">Estado de la agenda</h3></div>
+              <div class="lienzo"><canvas id="g-estado"></canvas></div>
+            </div>
+            <div class="vidrio rounded-3xl p-5 xl:col-span-2 tarjeta-grafica">
+              <div class="flex items-center gap-2 mb-3"><i data-lucide="scan-line" class="w-5 h-5 text-cyan-500"></i><h3 class="font-display font-extrabold">Asistencia por modalidad</h3></div>
+              <div class="lienzo"><canvas id="g-modalidad"></canvas></div>
+            </div>
+            <div class="vidrio rounded-3xl p-5 xl:col-span-2 tarjeta-grafica">
+              <div class="flex items-center gap-2 mb-3"><i data-lucide="activity" class="w-5 h-5 text-cyan-500"></i><h3 class="font-display font-extrabold">Flujo de pacientes por hora</h3></div>
+              <div class="lienzo"><canvas id="g-flujo"></canvas></div>
+            </div>
+            <div class="vidrio rounded-3xl p-5 tarjeta-grafica">
+              <div class="flex items-center gap-2 mb-3"><i data-lucide="user-x" class="w-5 h-5 text-rose-500"></i><h3 class="font-display font-extrabold">Motivos de inasistencia</h3></div>
+              <div class="lienzo"><canvas id="g-motivos"></canvas></div>
+            </div>
+            <div class="vidrio rounded-3xl p-5 xl:col-span-2 tarjeta-grafica">
+              <div class="flex items-center gap-2 mb-3"><i data-lucide="trophy" class="w-5 h-5 text-amber-500"></i><h3 class="font-display font-extrabold">Productividad por técnico</h3></div>
+              <div class="lienzo"><canvas id="g-tecnicos"></canvas></div>
+            </div>
+            <div class="vidrio rounded-3xl p-5 tarjeta-grafica flex flex-col">
+              <div class="flex items-center gap-2 mb-3"><i data-lucide="zap" class="w-5 h-5 text-cyan-500"></i><h3 class="font-display font-extrabold">Últimos movimientos</h3></div>
+              <div id="mini-feed" class="space-y-2 overflow-y-auto max-h-[280px] pr-1"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ─────────────── AGENDA ─────────────── -->
+        <section id="vista-agenda" class="vista">
+          <div class="vidrio rounded-3xl overflow-hidden">
+            <div class="p-4 flex flex-wrap items-center gap-3 border-b" style="border-color:var(--borde)">
+              <div class="relative flex-1 min-w-[220px]">
+                <span class="absolute left-4 top-1/2 -translate-y-1/2 tenue"><i data-lucide="search" class="w-4 h-4"></i></span>
+                <input id="ag-buscar" class="campo !rounded-full !py-2.5 !pl-11 text-sm" placeholder="Buscar expediente, paciente, estudio, técnico…">
+              </div>
+              <div id="ag-estados" class="flex gap-2 flex-wrap">
+                <button class="chip activo" data-estado="">Todos</button>
+                <button class="chip" data-estado="Pendiente"><i data-lucide="hourglass" class="w-3.5 h-3.5"></i> Pendientes</button>
+                <button class="chip" data-estado="Asistió"><i data-lucide="check" class="w-3.5 h-3.5"></i> Asistieron</button>
+                <button class="chip" data-estado="Ausente"><i data-lucide="x" class="w-3.5 h-3.5"></i> No asistieron</button>
+              </div>
+              <select id="ag-modalidad" class="campo !w-auto !py-2 !rounded-full text-xs font-bold"></select>
+            </div>
+            <div class="overflow-auto max-h-[calc(100vh-220px)]">
+              <table class="tabla w-full">
+                <thead><tr><th>Hora</th><th>Expediente</th><th>Paciente</th><th>Estudio</th><th>Modalidad</th><th>Estado</th><th>Motivo / comentario</th><th>Técnico</th><th></th></tr></thead>
+                <tbody id="ag-cuerpo"></tbody>
+              </table>
+            </div>
+            <div class="p-3 text-xs tenue border-t flex justify-between" style="border-color:var(--borde)"><span id="ag-pie"></span><span>Restaurar devuelve el paciente a los iPads.</span></div>
+          </div>
+        </section>
+
+        <!-- ─────────────── ACTIVIDAD ─────────────── -->
+        <section id="vista-actividad" class="vista">
+          <div class="max-w-3xl mx-auto vidrio rounded-3xl p-6">
+            <div class="flex items-center gap-2 mb-6"><i data-lucide="history" class="w-5 h-5 text-cyan-500"></i><h3 class="font-display font-extrabold text-lg">Registro de actividad</h3><span class="ml-auto text-xs tenue">Últimos 150 movimientos</span></div>
+            <div id="linea-tiempo" class="space-y-4"></div>
+          </div>
+        </section>
+
+        <!-- ─────────────── REPORTES ─────────────── -->
+        <section id="vista-reportes" class="vista space-y-4">
+          <div class="vidrio rounded-3xl p-6 relative overflow-hidden">
+            <div class="absolute -right-20 -top-20 w-72 h-72 rounded-full bg-cyan-400/20 blur-3xl"></div>
+            <div class="relative grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto] gap-6 items-end">
+              <div>
+                <h2 class="font-display font-black text-2xl">Reporte de <span class="texto-gradiente">asistencia</span></h2>
+                <p class="tenue text-sm mt-1">Pacientes que asistieron, los que no y sus motivos. Exporta a Excel o imprime/guarda en PDF.</p>
+                <div class="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-5 gap-3 mt-5">
+                  <label class="col-span-2 md:col-span-1"><span class="text-[11px] font-black uppercase tracking-widest tenue">Origen</span>
+                    <select id="rp-origen" class="campo mt-1 !py-2.5 text-sm font-semibold"><option value="actual">Turno actual</option><option value="historial">Historial</option></select></label>
+                  <label class="rp-fechas hidden"><span class="text-[11px] font-black uppercase tracking-widest tenue">Desde</span><input id="rp-desde" type="date" class="campo mt-1 !py-2.5 text-sm"></label>
+                  <label class="rp-fechas hidden"><span class="text-[11px] font-black uppercase tracking-widest tenue">Hasta</span><input id="rp-hasta" type="date" class="campo mt-1 !py-2.5 text-sm"></label>
+                  <label><span class="text-[11px] font-black uppercase tracking-widest tenue">Modalidad</span><select id="rp-modalidad" class="campo mt-1 !py-2.5 text-sm font-semibold"></select></label>
+                  <label><span class="text-[11px] font-black uppercase tracking-widest tenue">Elaborado por</span><input id="rp-autor" class="campo mt-1 !py-2.5 text-sm" placeholder="Nombre"></label>
+                </div>
+              </div>
+              <button id="rp-generar" class="btn btn-primario !py-3.5 !px-6"><i data-lucide="sparkles" class="w-5 h-5"></i> Generar vista previa</button>
+            </div>
+          </div>
+
+          <div id="rp-resultado" class="hidden space-y-4">
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4" id="rp-kpis"></div>
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <div class="vidrio rounded-3xl p-5"><h3 class="font-display font-extrabold mb-3 flex items-center gap-2"><i data-lucide="user-x" class="w-5 h-5 text-rose-500"></i> Motivos de inasistencia</h3><div id="rp-motivos"></div></div>
+              <div class="vidrio rounded-3xl p-5 min-w-0"><h3 class="font-display font-extrabold mb-3 flex items-center gap-2"><i data-lucide="scan-line" class="w-5 h-5 text-cyan-500"></i> Por modalidad</h3><div id="rp-modalidades" class="overflow-x-auto"></div></div>
+            </div>
+            <div class="vidrio rounded-3xl overflow-hidden">
+              <div class="p-4 flex flex-wrap items-center gap-2 border-b" style="border-color:var(--borde)">
+                <div id="rp-pestanas" class="flex gap-1">
+                  <button class="pestana activa" data-p="Ausente">No asistieron <span class="num" id="rp-n-aus"></span></button>
+                  <button class="pestana" data-p="Asistió">Asistieron <span class="num" id="rp-n-asi"></span></button>
+                  <button class="pestana" data-p="Pendiente">Pendientes <span class="num" id="rp-n-pen"></span></button>
+                </div>
+                <div class="ml-auto flex flex-wrap gap-2">
+                  <button id="rp-imprimir" class="btn btn-fantasma"><i data-lucide="printer" class="w-4 h-4"></i> Imprimir / PDF</button>
+                  <button id="rp-csv" class="btn btn-fantasma"><i data-lucide="download" class="w-4 h-4"></i> CSV</button>
+                  <button id="rp-excel" class="btn btn-exito"><i data-lucide="file-spreadsheet" class="w-4 h-4"></i> Descargar Excel</button>
+                </div>
+              </div>
+              <div class="overflow-auto max-h-[60vh]"><table class="tabla w-full"><thead id="rp-cabeza"></thead><tbody id="rp-cuerpo"></tbody></table></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ─────────────── ADMINISTRACIÓN ─────────────── -->
+        <section id="vista-admin" class="vista space-y-4">
+          <div class="vidrio rounded-3xl p-6">
+            <div class="flex items-center gap-3 mb-5">
+              <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-400 to-rosales-700 text-white grid place-items-center shadow-lg shadow-cyan-500/30"><i data-lucide="cloud-upload" class="w-6 h-6"></i></div>
+              <div><h3 class="font-display font-black text-lg">Cargar agenda del día</h3><p class="text-sm tenue">Sube el Excel descargado de la plataforma del hospital. Verás una vista previa antes de cargarlo.</p></div>
+            </div>
+            <label id="zona-carga" class="zona-carga flex flex-col items-center justify-center text-center p-10 cursor-pointer">
+              <input id="archivo" type="file" accept=".xlsx,.xls,.csv" class="hidden">
+              <div id="icono-carga" class="w-16 h-16 rounded-2xl bg-cyan-500/15 text-cyan-500 grid place-items-center"><i data-lucide="file-spreadsheet" class="w-8 h-8"></i></div>
+              <p class="font-bold mt-4">Arrastra aquí el archivo <span class="text-cyan-500">.xlsx</span> o haz clic para elegirlo</p>
+              <p class="text-xs tenue mt-1">Se detectan automáticamente expediente, paciente, estudio, equipo y hora.</p>
+            </label>
+
+            <div id="vista-previa" class="hidden mt-6">
+              <div class="flex flex-wrap items-center gap-3">
+                <span class="insignia bg-cyan-500/15 text-cyan-500"><i data-lucide="file-spreadsheet" class="w-3.5 h-3.5"></i> <span id="vp-archivo"></span></span>
+                <span class="insignia bg-emerald-500/15 text-emerald-500"><span id="vp-total" class="num"></span> pacientes detectados</span>
+                <div id="vp-modalidades" class="flex flex-wrap gap-2"></div>
+              </div>
+              <details class="mt-4">
+                <summary class="cursor-pointer text-sm font-bold text-cyan-500">Ajustar columnas detectadas</summary>
+                <div id="vp-mapeo" class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3"></div>
+              </details>
+              <div class="overflow-auto max-h-80 mt-4 rounded-2xl border" style="border-color:var(--borde)">
+                <table class="tabla w-full"><thead><tr><th>Exp.</th><th>Paciente</th><th>Estudio</th><th>Equipo</th><th>Modalidad</th><th>Ubicación</th><th>Hora</th></tr></thead><tbody id="vp-cuerpo"></tbody></table>
+              </div>
+              <div class="flex gap-3 mt-5">
+                <button id="vp-cancelar" class="btn btn-fantasma">Cancelar</button>
+                <button id="vp-cargar" class="btn btn-primario flex-1 !py-3.5"><i data-lucide="cloud-upload" class="w-5 h-5"></i> Cargar <span id="vp-n" class="num"></span> pacientes a la agenda</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="vidrio rounded-3xl p-6 flex flex-col">
+              <div class="flex items-center gap-3"><div class="w-11 h-11 rounded-2xl bg-amber-500/15 text-amber-500 grid place-items-center"><i data-lucide="lock" class="w-5 h-5"></i></div><h3 class="font-display font-black">Liberar bloqueos</h3></div>
+              <p class="text-sm tenue mt-3 flex-1">Si un técnico dejó un paciente "en revisión" (se le cerró la app), esto lo devuelve a pendiente para todos.</p>
+              <button id="btn-liberar" class="btn btn-fantasma mt-4"><i data-lucide="rotate-ccw" class="w-4 h-4"></i> Liberar <span id="n-bloqueos" class="num">0</span> bloqueos</button>
+            </div>
+            <div class="vidrio rounded-3xl p-6 flex flex-col border !border-rose-500/30">
+              <div class="flex items-center gap-3"><div class="w-11 h-11 rounded-2xl bg-rose-500/15 text-rose-500 grid place-items-center"><i data-lucide="archive" class="w-5 h-5"></i></div><h3 class="font-display font-black">Cierre de turno</h3></div>
+              <p class="text-sm tenue mt-3 flex-1">Archiva la agenda en la hoja <b>Historial</b> (para reportes por fecha) y limpia las pantallas de todos los técnicos. <b>Genera el reporte antes.</b></p>
+              <button id="btn-cierre" class="btn btn-peligro mt-4"><i data-lucide="archive" class="w-4 h-4"></i> Cerrar turno y limpiar agenda</button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- ═══════════════ MODAL CONFIRMACIÓN ═══════════════ -->
+  <div id="modal-confirmar" class="capa-modal">
+    <div id="caja-confirmar" class="vidrio rounded-[1.75rem] w-full max-w-md p-7 text-center">
+      <div id="cf-icono" class="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-rose-400 to-rose-700 text-white grid place-items-center shadow-lg shadow-rose-500/40"><i data-lucide="shield-alert" class="w-8 h-8"></i></div>
+      <h3 id="cf-titulo" class="font-display font-black text-xl mt-5">¿Confirmar?</h3>
+      <p id="cf-mensaje" class="tenue text-sm mt-2"></p>
+      <div class="flex gap-3 mt-7">
+        <button id="cf-no" class="btn btn-fantasma flex-1">Cancelar</button>
+        <button id="cf-si" class="btn btn-peligro flex-1">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <?!= include('Comun') ?>
+  <script>
+    /* ── Estado ───────────────────────────────────────────────────────── */
+    const S = { agenda: [], vivo: {}, logs: [], conexiones: {}, vista: 'panel', agEstado: '', agModalidad: '', agTexto: '', reporte: null, rpPestana: 'Ausente', carga: null };
+    const VISTAS = {
+      panel: ['Panel en vivo', 'Asistencia de pacientes en tiempo real'],
+      agenda: ['Agenda del turno', 'Todas las citas con su estado actual'],
+      actividad: ['Actividad', 'Cada registro de los técnicos, al instante'],
+      reportes: ['Reportes', 'Asistencia, inasistencias y motivos'],
+      admin: ['Administración', 'Carga de agenda, bloqueos y cierre de turno']
+    };
+
+    /* ── Arranque ─────────────────────────────────────────────────────── */
+    document.addEventListener('DOMContentLoaded', async () => {
+      prepararGraficas();
+      llenarSelectsModalidad();
+      const hoy = new Date().toISOString().slice(0, 10);
+      $('#rp-desde').value = hoy; $('#rp-hasta').value = hoy;
+      try { $('#rp-autor').value = localStorage.getItem('ugm-supervisor') || ''; } catch (e) {}
+      iniciarReloj($('#reloj'));
+      vigilarConexion(ok => { $('#punto-conexion').classList.toggle('desconectado', !ok); $('#txt-conexion').textContent = ok ? 'En vivo' : 'Sin conexión'; });
+
+      const datos = cargarAgenda();
+      await reproducirIntro();
+      gsap.to('#app', { opacity: 1, duration: .3 });
+      gsap.from('#lateral', { x: -80, opacity: 0, duration: .9, ease: 'expo.out' });
+      gsap.from('#cabecera', { y: -50, opacity: 0, duration: .8, ease: 'expo.out', delay: .1 });
+      gsap.from('#vista-panel .kpi-card', { y: 40, opacity: 0, scale: .92, duration: .7, stagger: .08, ease: 'back.out(1.5)', delay: .2 });
+      gsap.from('#vista-panel .tarjeta-grafica', { y: 50, opacity: 0, duration: .8, stagger: .08, ease: 'power3.out', delay: .4 });
+      moverIndicador(false);
+      await datos;
+      escucharFirebase();
+      setInterval(cargarAgenda, 120000);
+    });
+
+    async function cargarAgenda() {
+      try { S.agenda = await servidor('obtenerAgenda'); actualizarTodo(); }
+      catch (err) { toast('No se pudo leer la agenda de la hoja.', 'error'); }
+    }
+
+    function escucharFirebase() {
+      db.ref('pacientes_hoy').on('value', s => { S.vivo = s.val() || {}; actualizarTodo(); });
+      db.ref('conexiones').on('value', s => { S.conexiones = s.val() || {}; pintarTecnicos(); });
+      db.ref('sistema/recargar').on('value', s => { if (s.val()) cargarAgenda(); });
+      db.ref('logs').on('value', s => { if (!s.exists()) { S.logs = []; pintarActividad(); } });
+      db.ref('logs').limitToLast(150).on('child_added', s => {
+        S.logs.unshift(s.val());
+        if (S.logs.length > 150) S.logs.pop();
+        agregarEvento(s.val(), true);
+      });
+    }
+
+    function citas() { return S.agenda.map(c => estadoVivo(c, S.vivo)); }
+    const procesada = c => c.estado === ESTADO.ASISTIO || c.estado === ESTADO.AUSENTE;
+
+    function actualizarTodo() {
+      const todas = citas();
+      pintarKpis(todas);
+      pintarGraficas(todas);
+      pintarAgenda(todas);
+      $('#n-bloqueos').textContent = todas.filter(c => c.estado === ESTADO.REVISANDO).length;
+    }
+
+    /* ── Navegación ───────────────────────────────────────────────────── */
+    $('#nav').addEventListener('click', e => { const b = e.target.closest('[data-vista]'); if (b) irA(b.dataset.vista); });
+    $('#nav-movil').addEventListener('change', e => irA(e.target.value));
+    $('#btn-reporte-rapido').addEventListener('click', () => { irA('reportes'); setTimeout(generarVistaPrevia, 350); });
+
+    function irA(vista) {
+      if (vista === S.vista) return;
+      const anterior = $('#vista-' + S.vista), nueva = $('#vista-' + vista);
+      S.vista = vista;
+      $$('#nav .nav-item').forEach(b => b.classList.toggle('activo', b.dataset.vista === vista));
+      $('#nav-movil').value = vista;
+      moverIndicador(true);
+      gsap.to(anterior, { opacity: 0, y: 16, duration: .2, ease: 'power2.in', onComplete: () => {
+        anterior.classList.remove('activa');
+        nueva.classList.add('activa');
+        gsap.fromTo(nueva, { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: .45, ease: 'power3.out' });
+        gsap.from(nueva.querySelectorAll(':scope > div, :scope > .grid > div'), { y: 30, opacity: 0, duration: .5, stagger: .05, ease: 'power3.out', clearProps: 'all' });
+        if (vista === 'panel') Object.values(G).forEach(g => g.resize());
+      } });
+      gsap.fromTo('#titulo-vista', { opacity: 0, x: -14 }, { opacity: 1, x: 0, duration: .4 });
+      $('#titulo-vista').textContent = VISTAS[vista][0];
+      $('#subtitulo-vista').textContent = VISTAS[vista][1];
+    }
+
+    function moverIndicador(animar) {
+      const b = $('#nav .nav-item.activo'); if (!b) return;
+      const props = { top: b.offsetTop, height: b.offsetHeight };
+      animar ? gsap.to('#nav-indicador', { ...props, duration: .5, ease: 'expo.out' }) : gsap.set('#nav-indicador', props);
+    }
+
+    /* ── Técnicos conectados ──────────────────────────────────────────── */
+    function pintarTecnicos() {
+      const lista = Object.values(S.conexiones);
+      $('#cuenta-tecnicos').textContent = lista.length;
+      const todas = citas();
+      $('#lista-tecnicos').innerHTML = lista.length ? lista.map(t => {
+        const hechos = todas.filter(c => c.tecnico === t.nombre && procesada(c)).length;
+        return `<li class="flex items-center gap-3 p-2 rounded-xl hover:bg-cyan-500/5">
+          <div class="relative"><div class="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-400 to-rosales-700 grid place-items-center text-white text-xs font-black">${esc(iniciales(t.nombre))}</div><span class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2" style="border-color:var(--fondo)"></span></div>
+          <div class="min-w-0 flex-1"><p class="text-sm font-bold truncate">${esc(t.nombre)}</p><p class="text-[11px] tenue truncate">${t.sala && t.sala !== 'TODAS' ? esc(t.sala) : 'Todas las salas'} · desde ${horaDe(t.inicio)}</p></div>
+          <span class="num text-xs font-bold text-cyan-500">${hechos}</span>
+        </li>`;
+      }).join('') : '<li class="text-xs tenue py-2">Ningún técnico conectado.</li>';
+      gsap.from('#lista-tecnicos li', { x: -12, opacity: 0, stagger: .04, duration: .35 });
+    }
+
+    /* ── KPIs ─────────────────────────────────────────────────────────── */
+    function pintarKpis(todas) {
+      const asistio = todas.filter(c => c.estado === ESTADO.ASISTIO).length;
+      const ausente = todas.filter(c => c.estado === ESTADO.AUSENTE).length;
+      const revision = todas.filter(c => c.estado === ESTADO.REVISANDO).length;
+      const total = todas.length, hechos = asistio + ausente;
+      const ef = hechos ? Math.round(asistio / hechos * 100) : 0;
+      contar($('#k-total'), total);
+      contar($('#k-asistio'), asistio);
+      contar($('#k-ausente'), ausente);
+      contar($('#k-pendiente'), total - hechos);
+      contar($('#k-efectividad'), ef);
+      $('#k-revision').textContent = revision;
+      $('#k-modalidades').textContent = new Set(todas.map(c => c.modalidad)).size;
+      gsap.to('#anillo-efectividad', { strokeDashoffset: 263.9 * (1 - ef / 100), duration: 1.3, ease: 'power3.out' });
+      gsap.to('#b-asistio', { width: (total ? asistio / total * 100 : 0) + '%', duration: 1, ease: 'power3.out' });
+      gsap.to('#b-ausente', { width: (total ? ausente / total * 100 : 0) + '%', duration: 1, ease: 'power3.out' });
+      pintarTecnicos();
+    }
+
+    /* ── Gráficas ─────────────────────────────────────────────────────── */
+    const G = {};
+    function coloresTema() {
+      const oscuro = document.documentElement.classList.contains('dark');
+      return { texto: oscuro ? '#8BA3B8' : '#5B7186', rejilla: oscuro ? 'rgba(94,208,240,.08)' : 'rgba(16,86,127,.08)', fondo: oscuro ? '#0B1A2E' : '#ffffff' };
+    }
+    function prepararGraficas() {
+      const t = coloresTema();
+      Chart.defaults.font.family = 'Inter, sans-serif';
+      Chart.defaults.font.weight = 600;
+      Chart.defaults.color = t.texto;
+      Chart.defaults.plugins.legend.labels.usePointStyle = true;
+      Chart.defaults.plugins.tooltip.padding = 12;
+      Chart.defaults.plugins.tooltip.cornerRadius = 12;
+      Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(5,14,26,.92)';
+      Chart.defaults.animation.duration = 1100;
+      Chart.defaults.animation.easing = 'easeOutQuart';
+      Chart.defaults.maintainAspectRatio = false;
+      const ejes = (apilado, horizontal) => ({
+        x: { stacked: apilado, grid: { color: t.rejilla, display: !!horizontal }, ticks: { precision: 0 }, border: { display: false } },
+        y: { stacked: apilado, grid: { color: t.rejilla, display: !horizontal }, ticks: { precision: 0 }, border: { display: false } }
+      });
+
+      G.estado = new Chart($('#g-estado'), {
+        type: 'doughnut',
+        data: { labels: ['Asistieron', 'No asistieron', 'Pendientes', 'En revisión'], datasets: [{ data: [0, 0, 0, 0], backgroundColor: ['#10B981', '#F43F5E', '#00B2E3', '#F59E0B'], borderColor: t.fondo, borderWidth: 4, hoverOffset: 14, borderRadius: 6 }] },
+        options: { cutout: '68%', plugins: { legend: { position: 'bottom' } }, animation: { animateRotate: true, animateScale: true } }
+      });
+      G.modalidad = new Chart($('#g-modalidad'), {
+        type: 'bar',
+        data: { labels: [], datasets: [
+          { label: 'Asistieron', data: [], backgroundColor: '#10B981', borderRadius: 8, borderSkipped: false },
+          { label: 'No asistieron', data: [], backgroundColor: '#F43F5E', borderRadius: 8, borderSkipped: false },
+          { label: 'Pendientes', data: [], backgroundColor: 'rgba(0,178,227,.35)', borderRadius: 8, borderSkipped: false }
+        ] },
+        options: { scales: ejes(true), plugins: { legend: { position: 'top', align: 'end' } } }
+      });
+      const ctx = $('#g-flujo').getContext('2d');
+      const gradA = ctx.createLinearGradient(0, 0, 0, 280); gradA.addColorStop(0, 'rgba(16,185,129,.45)'); gradA.addColorStop(1, 'rgba(16,185,129,0)');
+      const gradB = ctx.createLinearGradient(0, 0, 0, 280); gradB.addColorStop(0, 'rgba(244,63,94,.35)'); gradB.addColorStop(1, 'rgba(244,63,94,0)');
+      G.flujo = new Chart(ctx, {
+        type: 'line',
+        data: { labels: [], datasets: [
+          { label: 'Asistieron', data: [], borderColor: '#10B981', backgroundColor: gradA, fill: true, cubicInterpolationMode: 'monotone', pointRadius: 4, pointHoverRadius: 7, pointBackgroundColor: '#10B981', borderWidth: 3 },
+          { label: 'No asistieron', data: [], borderColor: '#F43F5E', backgroundColor: gradB, fill: true, cubicInterpolationMode: 'monotone', pointRadius: 4, pointHoverRadius: 7, pointBackgroundColor: '#F43F5E', borderWidth: 3 }
+        ] },
+        options: { scales: ejes(false), interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'top', align: 'end' } } }
+      });
+      G.motivos = new Chart($('#g-motivos'), {
+        type: 'bar',
+        data: { labels: [], datasets: [{ label: 'Pacientes', data: [], backgroundColor: ['#F43F5E', '#FB7185', '#F97316', '#F59E0B', '#EAB308', '#A855F7', '#EC4899', '#64748B', '#0EA5E9', '#94A3B8'], borderRadius: 8, borderSkipped: false }] },
+        options: { indexAxis: 'y', scales: ejes(false, true), plugins: { legend: { display: false } } }
+      });
+      G.tecnicos = new Chart($('#g-tecnicos'), {
+        type: 'bar',
+        data: { labels: [], datasets: [
+          { label: 'Asistieron', data: [], backgroundColor: '#10B981', borderRadius: 8, borderSkipped: false },
+          { label: 'No asistieron', data: [], backgroundColor: '#F43F5E', borderRadius: 8, borderSkipped: false }
+        ] },
+        options: { scales: ejes(true), plugins: { legend: { position: 'top', align: 'end' } } }
+      });
+    }
+
+    document.addEventListener('tema-cambiado', () => {
+      const t = coloresTema();
+      Chart.defaults.color = t.texto;
+      Object.values(G).forEach(g => {
+        Object.values(g.options.scales || {}).forEach(s => { if (s.grid) s.grid.color = t.rejilla; });
+        if (g.config.type === 'doughnut') g.data.datasets[0].borderColor = t.fondo;
+        g.update('none');
+      });
+    });
+
+    /** Parte una etiqueta larga en varias líneas para que no se corte en el eje. */
+    function partirEtiqueta(texto, max = 18) {
+      const lineas = [''];
+      String(texto).split(' ').forEach(p => {
+        if ((lineas[lineas.length - 1] + ' ' + p).trim().length > max) lineas.push(p);
+        else lineas[lineas.length - 1] = (lineas[lineas.length - 1] + ' ' + p).trim();
+      });
+      return lineas;
+    }
+
+    function pintarGraficas(todas) {
+      const n = e => todas.filter(c => c.estado === e).length;
+      const revision = n(ESTADO.REVISANDO);
+      G.estado.data.datasets[0].data = [n(ESTADO.ASISTIO), n(ESTADO.AUSENTE), todas.length - n(ESTADO.ASISTIO) - n(ESTADO.AUSENTE) - revision, revision];
+      G.estado.update();
+
+      const mods = [...new Set(todas.map(c => c.modalidad))].sort();
+      const porMod = (e, m) => todas.filter(c => c.modalidad === m && (e ? c.estado === e : !procesada(c))).length;
+      G.modalidad.data.labels = mods;
+      G.modalidad.data.datasets[0].data = mods.map(m => porMod(ESTADO.ASISTIO, m));
+      G.modalidad.data.datasets[1].data = mods.map(m => porMod(ESTADO.AUSENTE, m));
+      G.modalidad.data.datasets[2].data = mods.map(m => porMod(null, m));
+      G.modalidad.update();
+
+      const conHora = todas.filter(c => procesada(c) && c.ts);
+      const horas = conHora.map(c => new Date(c.ts).getHours());
+      const hMin = horas.length ? Math.min(...horas) : 7, hMax = horas.length ? Math.max(...horas) : 15;
+      const rango = []; for (let h = Math.min(hMin, 7); h <= Math.max(hMax, hMin + 6); h++) rango.push(h);
+      G.flujo.data.labels = rango.map(h => String(h).padStart(2, '0') + ':00');
+      G.flujo.data.datasets[0].data = rango.map(h => conHora.filter(c => c.estado === ESTADO.ASISTIO && new Date(c.ts).getHours() === h).length);
+      G.flujo.data.datasets[1].data = rango.map(h => conHora.filter(c => c.estado === ESTADO.AUSENTE && new Date(c.ts).getHours() === h).length);
+      G.flujo.update();
+
+      const motivos = {};
+      todas.filter(c => c.estado === ESTADO.AUSENTE).forEach(c => { const m = c.motivo || 'Sin motivo'; motivos[m] = (motivos[m] || 0) + 1; });
+      const ordenM = Object.keys(motivos).sort((a, b) => motivos[b] - motivos[a]);
+      G.motivos.data.labels = ordenM.length ? ordenM.map(m => partirEtiqueta(m)) : ['Sin inasistencias'];
+      G.motivos.data.datasets[0].data = ordenM.length ? ordenM.map(m => motivos[m]) : [0];
+      G.motivos.update();
+
+      const tecs = {};
+      todas.filter(procesada).forEach(c => { const t = c.tecnico || '—'; tecs[t] = tecs[t] || [0, 0]; tecs[t][c.estado === ESTADO.ASISTIO ? 0 : 1]++; });
+      const ordenT = Object.keys(tecs).sort((a, b) => (tecs[b][0] + tecs[b][1]) - (tecs[a][0] + tecs[a][1]));
+      G.tecnicos.data.labels = ordenT;
+      G.tecnicos.data.datasets[0].data = ordenT.map(t => tecs[t][0]);
+      G.tecnicos.data.datasets[1].data = ordenT.map(t => tecs[t][1]);
+      G.tecnicos.update();
+    }
+
+    /* ── Agenda ───────────────────────────────────────────────────────── */
+    function llenarSelectsModalidad() {
+      const op = '<option value="">Todas las modalidades</option>' + Object.keys(MODALIDADES).map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+      $('#ag-modalidad').innerHTML = op; $('#rp-modalidad').innerHTML = op;
+    }
+    $('#ag-buscar').addEventListener('input', e => { S.agTexto = e.target.value.trim().toLowerCase(); pintarAgenda(citas(), true); });
+    $('#ag-modalidad').addEventListener('change', e => { S.agModalidad = e.target.value; pintarAgenda(citas(), true); });
+    $('#ag-estados').addEventListener('click', e => {
+      const b = e.target.closest('[data-estado]'); if (!b) return;
+      S.agEstado = b.dataset.estado;
+      $$('#ag-estados .chip').forEach(c => c.classList.toggle('activo', c === b));
+      pintarAgenda(citas(), true);
+    });
+
+    function insigniaEstado(e) {
+      const m = {
+        'Asistió':   ['bg-emerald-500/15 text-emerald-500', 'check', 'Asistió'],
+        'Ausente':   ['bg-rose-500/15 text-rose-500', 'x', 'No asistió'],
+        'Revisando': ['bg-amber-500/15 text-amber-500', 'lock', 'En revisión']
+      }[e] || ['bg-cyan-500/15 text-cyan-500', 'hourglass', 'Pendiente'];
+      return `<span class="insignia ${m[0]}">${icono(m[1], 'w-3 h-3')} ${m[2]}</span>`;
+    }
+
+    function pintarAgenda(todas, animar) {
+      const filas = todas
+        .filter(c => !S.agEstado || (S.agEstado === ESTADO.PENDIENTE ? !procesada(c) : c.estado === S.agEstado))
+        .filter(c => !S.agModalidad || c.modalidad === S.agModalidad)
+        .filter(c => !S.agTexto || [c.expediente, c.paciente, c.estudio, c.tecnico, c.ubicacion, c.motivo].join(' ').toLowerCase().includes(S.agTexto))
+        .sort((a, b) => (minutosDeHora(a.hora) ?? 9999) - (minutosDeHora(b.hora) ?? 9999));
+      $('#ag-cuerpo').innerHTML = filas.length ? filas.map(c => {
+        const m = modalidad(c.modalidad);
+        return `<tr>
+          <td class="num font-bold">${esc(c.hora || '—')}</td>
+          <td class="num text-cyan-500 font-bold">${esc(c.expediente)}</td>
+          <td class="font-bold uppercase">${esc(c.paciente)}<div class="text-[11px] tenue normal-case font-medium">${esc(c.ubicacion)}</div></td>
+          <td>${esc(c.estudio)}${c.equipo ? `<div class="text-[11px] tenue">${esc(c.equipo)}</div>` : ''}</td>
+          <td><span class="insignia" style="background:${m.color}22;color:${m.color}">${icono(m.icono, 'w-3 h-3')} ${esc(c.modalidad)}</span></td>
+          <td>${insigniaEstado(c.estado)}</td>
+          <td class="max-w-[240px]">${c.estado === ESTADO.AUSENTE ? `<span class="text-rose-500 font-semibold">${esc(c.motivo || '—')}</span>${c.comentario ? `<div class="text-[11px] tenue italic">“${esc(c.comentario)}”</div>` : ''}` : '<span class="tenue">—</span>'}</td>
+          <td>${c.tecnico ? `<span class="font-semibold">${esc(c.tecnico)}</span><div class="num text-[11px] tenue">${c.ts ? horaDe(c.ts) : ''}</div>` : '<span class="tenue">—</span>'}</td>
+          <td>${procesada(c) || c.estado === ESTADO.REVISANDO ? `<button data-restaurar="${esc(c.id)}" class="btn btn-fantasma !py-1.5 !px-3 text-xs">${icono('undo-2', 'w-3.5 h-3.5')} Restaurar</button>` : ''}</td>
+        </tr>`;
+      }).join('') : `<tr><td colspan="9" class="text-center py-16 tenue">${icono('list-checks', 'w-10 h-10 mx-auto opacity-40')}<p class="mt-3">No hay citas con estos filtros.</p></td></tr>`;
+      $('#ag-pie').textContent = `${filas.length} de ${todas.length} citas`;
+      refrescarIconos();
+      if (animar) gsap.from('#ag-cuerpo tr', { opacity: 0, x: -10, duration: .3, stagger: .012 });
+    }
+
+    $('#ag-cuerpo').addEventListener('click', e => {
+      const b = e.target.closest('[data-restaurar]'); if (!b) return;
+      const c = citas().find(x => x.id === b.dataset.restaurar); if (!c) return;
+      confirmar('Restaurar paciente', `¿Devolver a ${c.paciente} (Exp. ${c.expediente}) a la agenda de los técnicos? Se borrará su registro actual.`, 'Restaurar', async () => {
+        await db.ref('pacientes_hoy/' + c.id).set({ estado: ESTADO.PENDIENTE, restaurado: Date.now(), por: 'Supervisor' });
+        const local = S.agenda.find(x => x.id === c.id); if (local) Object.assign(local, { estado: ESTADO.PENDIENTE, motivo: '', comentario: '', tecnico: '', registrado: '' });
+        db.ref('logs').push({ tecnico: 'Supervisor', accion: 'Restauró', id: c.id, expediente: c.expediente, paciente: c.paciente, modalidad: c.modalidad, tiempo: Date.now() });
+        servidor('restaurarPaciente', c.id).catch(() => toast('No se pudo actualizar la hoja.', 'error'));
+        toast(`${c.paciente} volvió a la agenda.`, 'ok');
+      });
+    });
+
+    /* ── Actividad ────────────────────────────────────────────────────── */
+    function htmlEvento(l) {
+      const tipo = { 'Asistió': ['bg-emerald-500', 'check', 'text-emerald-500', 'registró la asistencia de'], 'Ausente': ['bg-rose-500', 'x', 'text-rose-500', 'registró la inasistencia de'], 'Restauró': ['bg-cyan-500', 'undo-2', 'text-cyan-500', 'devolvió a la agenda a'], 'Deshizo': ['bg-amber-500', 'undo-2', 'text-amber-500', 'deshizo el registro de'] }[l.accion] || ['bg-slate-500', 'circle-dot', 'tenue', l.accion];
+      return `<div class="evento"><span class="nodo ${tipo[0]} shadow-lg">${icono(tipo[1], 'w-3.5 h-3.5')}</span>
+        <div class="vidrio rounded-2xl p-3.5">
+          <div class="flex items-center gap-2 text-xs"><span class="font-black text-cyan-500">${esc(l.tecnico)}</span><span class="tenue num ml-auto">${horaDe(l.tiempo)}</span></div>
+          <p class="text-sm mt-1"><span class="tenue">${esc(tipo[3])}</span> <b class="uppercase">${esc(l.paciente)}</b> <span class="num text-xs tenue">· Exp. ${esc(l.expediente)}</span></p>
+          ${l.estudio ? `<p class="text-xs tenue mt-0.5">${esc(l.estudio)} · ${esc(l.modalidad || '')}</p>` : ''}
+          ${l.observacion ? `<p class="mt-2 text-xs ${tipo[2]} font-semibold flex items-start gap-1.5">${icono('message-square-more', 'w-3.5 h-3.5 shrink-0 mt-0.5')} ${esc(l.observacion)}</p>` : ''}
+        </div></div>`;
+    }
+    function pintarActividad() {
+      $('#linea-tiempo').innerHTML = S.logs.length ? S.logs.map(htmlEvento).join('') : '<p class="text-center tenue py-10">Sin actividad todavía.</p>';
+      $('#mini-feed').innerHTML = S.logs.slice(0, 12).map(htmlEvento).join('') || '<p class="text-center tenue text-sm py-10">Esperando registros…</p>';
+      refrescarIconos();
+    }
+    let pintadoPendiente = null;
+    function agregarEvento(l, animar) {
+      // Agrupa ráfagas (al abrir llegan 150 eventos de golpe) en un solo repintado.
+      clearTimeout(pintadoPendiente);
+      pintadoPendiente = setTimeout(() => {
+        pintarActividad();
+        if (animar) {
+          gsap.from('#mini-feed > .evento:first-child, #linea-tiempo > .evento:first-child', { x: -30, opacity: 0, scale: .95, duration: .5, ease: 'back.out(1.6)' });
+          gsap.fromTo('#mini-feed > .evento:first-child .vidrio', { boxShadow: '0 0 0 2px #00B2E3' }, { boxShadow: '0 0 0 0px #00B2E3', duration: 1.5 });
+        }
+      }, 120);
+    }
+
+    /* ── Reportes ─────────────────────────────────────────────────────── */
+    $('#rp-origen').addEventListener('change', e => {
+      $$('.rp-fechas').forEach(x => x.classList.toggle('hidden', e.target.value !== 'historial'));
+    });
+    $('#rp-generar').addEventListener('click', generarVistaPrevia);
+
+    async function generarVistaPrevia() {
+      const origen = $('#rp-origen').value, mod = $('#rp-modalidad').value;
+      const btn = $('#rp-generar');
+      btn.disabled = true; btn.innerHTML = `${icono('refresh-cw', 'w-5 h-5 animate-spin')} Generando…`; refrescarIconos();
+      try {
+        let filas = origen === 'actual' ? citas() : await servidor('obtenerDatosReporte', { origen, desde: $('#rp-desde').value, hasta: $('#rp-hasta').value });
+        filas = filas.map(c => ({ ...c, estado: procesada(c) ? c.estado : ESTADO.PENDIENTE, registrado: c.ts && origen === 'actual' ? new Date(c.ts).toLocaleString('es-SV') : c.registrado }));
+        if (mod) filas = filas.filter(c => c.modalidad === mod);
+        const titulo = origen === 'actual' ? 'Turno actual · ' + new Date().toLocaleDateString('es-SV', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+          : `Historial del ${$('#rp-desde').value.split('-').reverse().join('/')} al ${$('#rp-hasta').value.split('-').reverse().join('/')}`;
+        S.reporte = { filas, titulo: titulo + (mod ? ' · ' + mod : ''), autor: $('#rp-autor').value.trim() };
+        try { localStorage.setItem('ugm-supervisor', S.reporte.autor); } catch (e) {}
+        pintarReporte();
+      } catch (err) {
+        toast('No se pudo obtener los datos del reporte.', 'error');
+      } finally {
+        btn.disabled = false; btn.innerHTML = `${icono('sparkles', 'w-5 h-5')} Generar vista previa`; refrescarIconos();
+      }
+    }
+
+    function resumenReporte(filas) {
+      const asi = filas.filter(c => c.estado === ESTADO.ASISTIO), aus = filas.filter(c => c.estado === ESTADO.AUSENTE), pen = filas.filter(c => !procesada(c));
+      const motivos = {}; aus.forEach(c => { const m = c.motivo || 'Sin motivo'; motivos[m] = (motivos[m] || 0) + 1; });
+      const mods = {}; filas.forEach(c => { mods[c.modalidad] = mods[c.modalidad] || [0, 0, 0]; mods[c.modalidad][c.estado === ESTADO.ASISTIO ? 0 : c.estado === ESTADO.AUSENTE ? 1 : 2]++; });
+      const reg = asi.length + aus.length;
+      return { asi, aus, pen, motivos, mods, reg, tasa: reg ? asi.length / reg * 100 : 0 };
+    }
+
+    function pintarReporte() {
+      const { filas } = S.reporte, r = resumenReporte(filas);
+      $('#rp-resultado').classList.remove('hidden');
+      const kpi = (titulo, valor, color, ic, extra) => `<div class="vidrio kpi-card rounded-3xl p-5"><div class="halo" style="background:${color}"></div><div class="relative flex justify-between items-start"><p class="text-[11px] font-black uppercase tracking-widest tenue">${titulo}</p><span class="w-10 h-10 rounded-xl grid place-items-center" style="background:${color}22;color:${color}">${icono(ic, 'w-5 h-5')}</span></div><p class="relative num font-display font-black text-4xl mt-2" style="color:${color}" data-cifra="${valor}">0</p><p class="relative text-xs tenue mt-1">${extra}</p></div>`;
+      $('#rp-kpis').innerHTML = kpi('Citas', filas.length, '#00B2E3', 'users', esc(S.reporte.titulo))
+        + kpi('Asistieron', r.asi.length, '#10B981', 'user-round-check', `${r.tasa.toFixed(1)}% de los registrados`)
+        + kpi('No asistieron', r.aus.length, '#F43F5E', 'user-round-x', `${(r.reg ? 100 - r.tasa : 0).toFixed(1)}% de los registrados`)
+        + kpi('Sin registrar', r.pen.length, '#F59E0B', 'hourglass', 'Pendientes al generar');
+      $$('#rp-kpis [data-cifra]').forEach(el => contar(el, +el.dataset.cifra));
+
+      const maxM = Math.max(1, ...Object.values(r.motivos));
+      $('#rp-motivos').innerHTML = Object.keys(r.motivos).length ? Object.keys(r.motivos).sort((a, b) => r.motivos[b] - r.motivos[a]).map(m => `
+        <div class="py-2"><div class="flex items-center gap-3 text-sm"><span class="w-8 h-8 rounded-lg bg-rose-500/15 text-rose-500 grid place-items-center shrink-0">${icono(iconoMotivo(m), 'w-4 h-4')}</span><span class="font-semibold flex-1">${esc(m)}</span><span class="num font-bold">${r.motivos[m]}</span><span class="num text-xs tenue w-14 text-right">${(r.motivos[m] / r.aus.length * 100).toFixed(1)}%</span></div>
+        <div class="h-2 rounded-full bg-rose-500/10 mt-2 ml-11 overflow-hidden"><div class="barra-rp h-full rounded-full bg-gradient-to-r from-rose-400 to-rose-600" style="width:0" data-w="${r.motivos[m] / maxM * 100}"></div></div></div>`).join('')
+        : `<p class="tenue text-sm py-6 text-center">${icono('sparkles', 'w-6 h-6 mx-auto mb-2 text-emerald-500')}Sin inasistencias en este periodo.</p>`;
+
+      $('#rp-modalidades').innerHTML = `<table class="tabla w-full [&_td]:!px-2.5 [&_th]:!px-2.5"><thead><tr><th>Modalidad</th><th>Asistieron</th><th>No asistieron</th><th>Pendientes</th><th>% asistencia</th></tr></thead><tbody>${Object.keys(r.mods).sort().map(m => {
+        const v = r.mods[m], md = modalidad(m), reg = v[0] + v[1];
+        return `<tr><td><span class="insignia" style="background:${md.color}22;color:${md.color}">${icono(md.icono, 'w-3 h-3')} ${esc(m)}</span></td><td class="num text-emerald-500 font-bold">${v[0]}</td><td class="num text-rose-500 font-bold">${v[1]}</td><td class="num tenue">${v[2]}</td><td class="num font-bold">${reg ? (v[0] / reg * 100).toFixed(0) + '%' : '—'}</td></tr>`;
+      }).join('')}</tbody></table>`;
+
+      $('#rp-n-aus').textContent = `(${r.aus.length})`; $('#rp-n-asi').textContent = `(${r.asi.length})`; $('#rp-n-pen').textContent = `(${r.pen.length})`;
+      pintarTablaReporte();
+      refrescarIconos();
+      gsap.from('#rp-resultado > *', { y: 40, opacity: 0, duration: .6, stagger: .1, ease: 'power3.out', clearProps: 'all' });
+      gsap.to('.barra-rp', { width: (i, el) => el.dataset.w + '%', duration: 1.2, stagger: .08, ease: 'power3.out', delay: .3 });
+    }
+
+    $('#rp-pestanas').addEventListener('click', e => {
+      const b = e.target.closest('[data-p]'); if (!b) return;
+      S.rpPestana = b.dataset.p;
+      $$('#rp-pestanas .pestana').forEach(x => x.classList.toggle('activa', x === b));
+      pintarTablaReporte();
+      gsap.from('#rp-cuerpo tr', { opacity: 0, y: 8, stagger: .015, duration: .3 });
+    });
+
+    function pintarTablaReporte() {
+      const p = S.rpPestana, aus = p === ESTADO.AUSENTE;
+      const filas = S.reporte.filas.filter(c => p === ESTADO.PENDIENTE ? !procesada(c) : c.estado === p)
+        .sort((a, b) => (minutosDeHora(a.hora) ?? 9999) - (minutosDeHora(b.hora) ?? 9999));
+      $('#rp-cabeza').innerHTML = `<tr><th>Hora</th><th>Expediente</th><th>Paciente</th><th>Estudio</th><th>Modalidad</th>${aus ? '<th>Motivo</th><th>Comentario</th>' : ''}${p !== ESTADO.PENDIENTE ? '<th>Técnico</th>' : ''}</tr>`;
+      $('#rp-cuerpo').innerHTML = filas.length ? filas.map(c => `<tr><td class="num">${esc(c.hora)}</td><td class="num text-cyan-500 font-bold">${esc(c.expediente)}</td><td class="font-bold uppercase">${esc(c.paciente)}</td><td>${esc(c.estudio)}</td><td>${esc(c.modalidad)}</td>${aus ? `<td class="text-rose-500 font-semibold">${esc(c.motivo)}</td><td class="tenue italic">${esc(c.comentario)}</td>` : ''}${p !== ESTADO.PENDIENTE ? `<td>${esc(c.tecnico)}</td>` : ''}</tr>`).join('')
+        : '<tr><td colspan="8" class="text-center tenue py-10">Sin registros.</td></tr>';
+    }
+
+    $('#rp-excel').addEventListener('click', async () => {
+      if (!S.reporte) return;
+      const btn = $('#rp-excel'), html = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = `${icono('refresh-cw', 'w-4 h-4 animate-spin')} Creando Excel…`; refrescarIconos();
+      try {
+        const r = await servidor('generarReporteExcel', S.reporte.filas, { titulo: S.reporte.titulo, generadoPor: S.reporte.autor });
+        if (!r.exito) return toast(r.mensaje, 'aviso');
+        toast('Reporte listo. Descargando…', 'ok', { accion: 'Abrir en Sheets', duracion: 9000, alAccionar: () => window.open(r.urlHoja, '_blank') });
+        window.open(r.url, '_blank');
+      } catch (err) { toast('No se pudo crear el Excel.', 'error'); }
+      finally { btn.disabled = false; btn.innerHTML = html; refrescarIconos(); }
+    });
+
+    $('#rp-csv').addEventListener('click', () => {
+      if (!S.reporte) return;
+      const cols = ['expediente', 'paciente', 'estudio', 'modalidad', 'equipo', 'ubicacion', 'fecha', 'hora', 'estado', 'motivo', 'comentario', 'tecnico', 'registrado'];
+      const csv = '﻿' + [cols.join(';')].concat(S.reporte.filas.map(c => cols.map(k => `"${String(c[k] ?? '').replace(/"/g, '""')}"`).join(';'))).join('\r\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+      a.download = 'reporte_imagenologia_' + new Date().toISOString().slice(0, 10) + '.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+    });
+
+    $('#rp-imprimir').addEventListener('click', () => {
+      if (!S.reporte) return;
+      const w = window.open('', '_blank');
+      if (!w) return toast('El navegador bloqueó la ventana emergente. Permite ventanas emergentes para este sitio.', 'aviso', { duracion: 8000 });
+      w.document.write(htmlImpresion());
+      w.document.close();
+      setTimeout(() => w.print(), 600);
+    });
+
+    function htmlImpresion() {
+      const { filas, titulo, autor } = S.reporte, r = resumenReporte(filas);
+      const tabla = (lista, conMotivo, conTec) => lista.length ? `<table><thead><tr><th>#</th><th>Hora</th><th>Expediente</th><th>Paciente</th><th>Estudio</th><th>Modalidad</th>${conMotivo ? '<th>Motivo</th><th>Comentario</th>' : ''}${conTec ? '<th>Técnico</th>' : ''}</tr></thead><tbody>${lista
+        .sort((a, b) => (minutosDeHora(a.hora) ?? 9999) - (minutosDeHora(b.hora) ?? 9999))
+        .map((c, i) => `<tr><td>${i + 1}</td><td>${esc(c.hora)}</td><td>${esc(c.expediente)}</td><td>${esc(c.paciente)}</td><td>${esc(c.estudio)}</td><td>${esc(c.modalidad)}</td>${conMotivo ? `<td><b>${esc(c.motivo)}</b></td><td>${esc(c.comentario)}</td>` : ''}${conTec ? `<td>${esc(c.tecnico)}</td>` : ''}</tr>`).join('')}</tbody></table>` : '<p class="vacio">Sin registros.</p>';
+      return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Reporte de asistencia · Imagenología</title>
+      <style>
+        @page { size: letter; margin: 14mm 12mm; }
+        * { box-sizing: border-box; } body { font-family: Arial, Helvetica, sans-serif; color: #0F2438; font-size: 11px; margin: 0; }
+        .cab { display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid #00B2E3; padding-bottom: 10px; }
+        .cab img.logo { height: 58px; } .cab img.escudo { height: 52px; }
+        h1 { font-size: 18px; margin: 14px 0 2px; color: #10567F; } .sub { color: #5B7186; margin: 0 0 12px; }
+        .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0 16px; }
+        .kpi { border: 1px solid #D5E3EC; border-radius: 10px; padding: 10px; } .kpi b { display: block; font-size: 22px; margin-top: 2px; } .kpi span { font-size: 9px; text-transform: uppercase; letter-spacing: .08em; color: #5B7186; font-weight: bold; }
+        h2 { font-size: 13px; margin: 18px 0 6px; padding: 6px 10px; border-radius: 6px; color: #fff; }
+        .verde { background: #059669; } .rojo { background: #BE123C; } .ambar { background: #D97706; } .azul { background: #10567F; }
+        table { width: 100%; border-collapse: collapse; } th { background: #EEF4F8; text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; } th, td { border: 1px solid #D5E3EC; padding: 5px 6px; vertical-align: top; }
+        tr { page-break-inside: avoid; } .dos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } .vacio { color: #94A3B8; font-style: italic; }
+        .firma { margin-top: 40px; display: flex; gap: 40px; } .firma div { flex: 1; border-top: 1px solid #0F2438; padding-top: 4px; text-align: center; color: #5B7186; }
+        .pie { margin-top: 18px; font-size: 9px; color: #94A3B8; text-align: center; }
+      </style></head><body>
+      <div class="cab"><img class="logo" src="${$('#logo-impresion').src}"><div style="text-align:center"><b style="font-size:12px;color:#10567F">UNIDAD DE GESTIÓN MÉDICA</b><br><span style="color:#5B7186">Servicio de Imagenología</span></div><img class="escudo" src="${$('#escudo-impresion').src}"></div>
+      <h1>Reporte de asistencia de pacientes</h1>
+      <p class="sub">${esc(titulo)} · Generado el ${new Date().toLocaleString('es-SV')}${autor ? ' · Elaborado por ' + esc(autor) : ''}</p>
+      <div class="kpis">
+        <div class="kpi"><span>Citas</span><b>${filas.length}</b></div>
+        <div class="kpi"><span>Asistieron</span><b style="color:#059669">${r.asi.length}</b>${r.tasa.toFixed(1)}% de registrados</div>
+        <div class="kpi"><span>No asistieron</span><b style="color:#BE123C">${r.aus.length}</b>${(r.reg ? 100 - r.tasa : 0).toFixed(1)}% de registrados</div>
+        <div class="kpi"><span>Sin registrar</span><b style="color:#D97706">${r.pen.length}</b>pendientes</div>
+      </div>
+      <div class="dos">
+        <div><h2 class="rojo">Motivos de inasistencia</h2>${Object.keys(r.motivos).length ? `<table><thead><tr><th>Motivo</th><th>Pacientes</th><th>%</th></tr></thead><tbody>${Object.keys(r.motivos).sort((a, b) => r.motivos[b] - r.motivos[a]).map(m => `<tr><td>${esc(m)}</td><td>${r.motivos[m]}</td><td>${(r.motivos[m] / r.aus.length * 100).toFixed(1)}%</td></tr>`).join('')}</tbody></table>` : '<p class="vacio">Sin inasistencias.</p>'}</div>
+        <div><h2 class="azul">Por modalidad</h2><table><thead><tr><th>Modalidad</th><th>Asist.</th><th>No asist.</th><th>Pend.</th></tr></thead><tbody>${Object.keys(r.mods).sort().map(m => `<tr><td>${esc(m)}</td><td>${r.mods[m][0]}</td><td>${r.mods[m][1]}</td><td>${r.mods[m][2]}</td></tr>`).join('')}</tbody></table></div>
+      </div>
+      <h2 class="rojo">Pacientes que NO asistieron (${r.aus.length})</h2>${tabla(r.aus, true, true)}
+      <h2 class="verde">Pacientes que asistieron (${r.asi.length})</h2>${tabla(r.asi, false, true)}
+      ${r.pen.length ? `<h2 class="ambar">Pacientes sin registrar (${r.pen.length})</h2>${tabla(r.pen, false, false)}` : ''}
+      <div class="firma"><div>Elaborado por</div><div>Vo. Bo. Jefatura de Imagenología</div></div>
+      <p class="pie">Nuevo Hospital Rosales · Red Nacional de Hospitales · Documento generado por el sistema de control de Imagenología</p>
+      </body></html>`;
+    }
+
+    /* ── Administración: carga del Excel ──────────────────────────────── */
+    const CAMPOS = [
+      ['expediente', 'Expediente', /expediente|^exp\b|n[°º.]?\s*exp|registro|historia cl/],
+      ['paciente', 'Paciente', /paciente|nombre/],
+      ['estudio', 'Estudio', /estudio|examen|procedimiento|prestaci|descripci/],
+      ['equipo', 'Equipo / sala', /equipo|modalidad|sala|recurso|agenda|maquina|m[aá]quina/],
+      ['ubicacion', 'Ubicación', /ubicaci|servicio|cama|procedencia|[aá]rea|origen/],
+      ['fecha', 'Fecha', /fecha/],
+      ['hora', 'Hora', /hora/],
+      ['medico', 'Médico', /m[eé]dico|solicitante|doctor|referente/]
+    ];
+    // Formato antiguo (sin encabezados reconocibles): columnas fijas desde la fila 6.
+    const MAPEO_ANTIGUO = { fila: 5, columnas: { expediente: 1, paciente: 2, ubicacion: 3, estudio: 4, hora: 6 } };
+
+    function normalizar(t) { return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(); }
+
+    function detectarModalidad(texto) {
+      const t = normalizar(texto).toUpperCase();
+      const reglas = [
+        ['RM', /RESONANCIA|\bRMN?\b|\bMRI\b|\bIRM\b/], ['TAC', /TOMOGRAF|\bTAC\b|\bTC\b|\bCT\b|ANGIOTAC|UROTAC/],
+        ['MAMOGRAFÍA', /MAMOGRAF|\bMAMO\b|TOMOSINTESIS/], ['DENSITOMETRÍA', /DENSITOMETR|\bDMO\b|\bDXA\b/],
+        ['FLUOROSCOPÍA', /FLUORO|ESOFAGOGRAMA|SERIE GASTRO|TRANSITO INTESTINAL|COLON POR ENEMA|UROGRAF|CISTOGRAF|HISTEROSALPING|FISTULOGRAF|DEFECOGRAF/],
+        ['INTERVENCIONISMO', /ANGIOGRAF|INTERVENC|EMBOLIZ|ARTERIOGRAF|FLEBOGRAF|BIOPSIA|DRENAJE/],
+        ['ULTRASONIDO', /ULTRASON|ULTRASONOGRAF|\bUSG?\b|ECOGRAF|\bECO\b|DOPPLER|SONOGRAF/],
+        ['RAYOS X', /RAYOS|\bRX\b|RADIOGRAF|PLACA|PORTATIL/]
+      ];
+      for (const [m, re] of reglas) if (re.test(t)) return m;
+      return 'OTROS';
+    }
+
+    const zona = $('#zona-carga');
+    ['dragenter', 'dragover'].forEach(ev => zona.addEventListener(ev, e => { e.preventDefault(); zona.classList.add('encima'); }));
+    ['dragleave', 'drop'].forEach(ev => zona.addEventListener(ev, e => { e.preventDefault(); zona.classList.remove('encima'); }));
+    zona.addEventListener('drop', e => { if (e.dataTransfer.files[0]) leerExcel(e.dataTransfer.files[0]); });
+    $('#archivo').addEventListener('change', e => { if (e.target.files[0]) leerExcel(e.target.files[0]); });
+
+    function leerExcel(archivo) {
+      gsap.to('#icono-carga', { rotation: 360, duration: .8, ease: 'power2.inOut' });
+      const lector = new FileReader();
+      lector.onload = (e) => {
+        try {
+          const libro = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
+          const hoja = libro.Sheets[libro.SheetNames[0]];
+          const filas = XLSX.utils.sheet_to_json(hoja, { header: 1, raw: false, defval: '', dateNF: 'dd/mm/yyyy hh:mm' });
+          S.carga = { nombre: archivo.name, filas, ...detectarColumnas(filas) };
+          mostrarVistaPrevia();
+        } catch (err) {
+          toast('No se pudo leer el archivo. ¿Es un Excel válido?', 'error');
+        }
+        $('#archivo').value = '';
+      };
+      lector.readAsArrayBuffer(archivo);
+    }
+
+    function detectarColumnas(filas) {
+      for (let i = 0; i < Math.min(filas.length, 25); i++) {
+        const celdas = filas[i].map(normalizar);
+        if (!celdas.some(c => CAMPOS[0][2].test(c))) continue;
+        const columnas = {}, usadas = new Set();
+        CAMPOS.forEach(([campo, , re]) => {
+          const j = celdas.findIndex((c, k) => c && !usadas.has(k) && re.test(c));
+          if (j >= 0) { columnas[campo] = j; usadas.add(j); }
+        });
+        if (columnas.expediente !== undefined && columnas.paciente !== undefined) return { encabezado: i, columnas };
+      }
+      return { encabezado: MAPEO_ANTIGUO.fila - 1, columnas: { ...MAPEO_ANTIGUO.columnas } };
+    }
+
+    function pacientesDeCarga() {
+      const { filas, encabezado, columnas } = S.carga;
+      const val = (f, campo) => columnas[campo] === undefined ? '' : String(f[columnas[campo]] ?? '').trim();
+      return filas.slice(encabezado + 1).map(f => {
+        const p = {}; CAMPOS.forEach(([campo]) => { p[campo] = val(f, campo); });
+        if (!p.hora) { const m = p.fecha.match(/\d{1,2}:\d{2}(\s?[ap]\.?\s?m\.?)?/i); if (m) p.hora = m[0]; }
+        if (p.fecha) p.fecha = p.fecha.replace(/\s+\d{1,2}:\d{2}.*$/, '');
+        p.modalidad = detectarModalidad(p.equipo + ' ' + p.estudio);
+        return p;
+      }).filter(p => p.expediente && p.paciente && !/expediente/i.test(p.expediente));
+    }
+
+    function mostrarVistaPrevia() {
+      const pacientes = pacientesDeCarga();
+      $('#vista-previa').classList.remove('hidden');
+      $('#vp-archivo').textContent = S.carga.nombre;
+      $('#vp-total').textContent = pacientes.length;
+      $('#vp-n').textContent = pacientes.length;
+      const cuenta = {}; pacientes.forEach(p => { cuenta[p.modalidad] = (cuenta[p.modalidad] || 0) + 1; });
+      $('#vp-modalidades').innerHTML = Object.keys(cuenta).sort().map(m => { const md = modalidad(m); return `<span class="insignia" style="background:${md.color}22;color:${md.color}">${icono(md.icono, 'w-3 h-3')} ${esc(m)} <b class="num">${cuenta[m]}</b></span>`; }).join('');
+      const cab = S.carga.filas[S.carga.encabezado] || [];
+      const ancho = Math.max(...S.carga.filas.slice(0, 40).map(f => f.length));
+      const opciones = ['<option value="">— No usar —</option>'].concat(Array.from({ length: ancho }, (_, j) => `<option value="${j}">${String.fromCharCode(65 + (j % 26))}${j >= 26 ? Math.floor(j / 26) : ''} · ${esc(String(cab[j] || '').slice(0, 24) || 'sin título')}</option>`)).join('');
+      $('#vp-mapeo').innerHTML = CAMPOS.map(([campo, etiqueta]) => `<label class="text-xs"><span class="font-bold tenue uppercase tracking-wider">${etiqueta}</span><select data-campo="${campo}" class="campo mt-1 !py-2 text-xs">${opciones}</select></label>`).join('');
+      $$('#vp-mapeo select').forEach(s => { s.value = S.carga.columnas[s.dataset.campo] ?? ''; });
+      $('#vp-cuerpo').innerHTML = pacientes.slice(0, 50).map(p => { const md = modalidad(p.modalidad); return `<tr><td class="num text-cyan-500 font-bold">${esc(p.expediente)}</td><td class="font-bold uppercase">${esc(p.paciente)}</td><td>${esc(p.estudio)}</td><td>${esc(p.equipo)}</td><td><span class="insignia" style="background:${md.color}22;color:${md.color}">${esc(p.modalidad)}</span></td><td>${esc(p.ubicacion)}</td><td class="num">${esc(p.hora)}</td></tr>`; }).join('')
+        + (pacientes.length > 50 ? `<tr><td colspan="7" class="text-center tenue text-xs">… y ${pacientes.length - 50} más</td></tr>` : '')
+        + (!pacientes.length ? '<tr><td colspan="7" class="text-center text-rose-500 py-6 font-semibold">No se encontraron pacientes. Revisa el mapeo de columnas.</td></tr>' : '');
+      $('#vp-cargar').disabled = !pacientes.length;
+      refrescarIconos();
+      gsap.fromTo('#vista-previa', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: .5 });
+      gsap.from('#vp-cuerpo tr', { opacity: 0, x: -10, stagger: .01, duration: .3 });
+    }
+    $('#vp-mapeo').addEventListener('change', e => {
+      const s = e.target.closest('select'); if (!s) return;
+      if (s.value === '') delete S.carga.columnas[s.dataset.campo]; else S.carga.columnas[s.dataset.campo] = +s.value;
+      mostrarVistaPrevia();
+    });
+    $('#vp-cancelar').addEventListener('click', () => { S.carga = null; gsap.to('#vista-previa', { opacity: 0, y: 10, duration: .25, onComplete: () => $('#vista-previa').classList.add('hidden') }); });
+
+    $('#vp-cargar').addEventListener('click', async () => {
+      const pacientes = pacientesDeCarga(); if (!pacientes.length) return;
+      const btn = $('#vp-cargar'), html = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = `${icono('refresh-cw', 'w-5 h-5 animate-spin')} Cargando ${pacientes.length} pacientes…`; refrescarIconos();
+      try {
+        const r = await servidor('registrarAgenda', pacientes);
+        if (!r.exito) return toast(r.mensaje, 'error', { duracion: 8000 });
+        toast(r.mensaje, 'ok', { duracion: 7000 });
+        const b = btn.getBoundingClientRect(); explosion(b.left + b.width / 2, b.top, '#00B2E3', 36);
+        S.carga = null; $('#vista-previa').classList.add('hidden');
+        await db.ref('sistema/recargar').set(Date.now());
+      } catch (err) { toast('Error al cargar la agenda en la hoja.', 'error'); }
+      finally { btn.disabled = false; btn.innerHTML = html; refrescarIconos(); }
+    });
+
+    /* ── Administración: bloqueos y cierre ────────────────────────────── */
+    $('#btn-liberar').addEventListener('click', () => {
+      const bloqueadas = Object.keys(S.vivo).filter(id => S.vivo[id].estado === ESTADO.REVISANDO);
+      if (!bloqueadas.length) return toast('No hay bloqueos activos.', 'info');
+      const cambios = {}; bloqueadas.forEach(id => { cambios[id] = { estado: ESTADO.PENDIENTE, liberado: Date.now() }; });
+      db.ref('pacientes_hoy').update(cambios).then(() => toast(`${bloqueadas.length} pacientes liberados.`, 'ok'));
+    });
+
+    $('#btn-cierre').addEventListener('click', () => {
+      const pend = citas().filter(c => !procesada(c)).length;
+      confirmar('Cerrar turno', `Se archivará la agenda en el Historial y se limpiarán las pantallas de todos los técnicos.${pend ? ` Quedan ${pend} pacientes sin registrar.` : ''} ¿Ya generaste el reporte?`, 'Cerrar turno', async () => {
+        const btn = $('#btn-cierre'); btn.disabled = true;
+        try {
+          const r = await servidor('cerrarTurno');
+          if (!r.exito) return toast(r.mensaje, 'aviso');
+          await db.ref('pacientes_hoy').remove();
+          await db.ref('logs').remove();
+          await db.ref('sistema/recargar').set(Date.now());
+          S.agenda = []; S.vivo = {}; actualizarTodo();
+          toast(r.mensaje, 'ok', { duracion: 8000 });
+        } catch (err) { toast('No se pudo cerrar el turno.', 'error'); }
+        finally { btn.disabled = false; }
+      });
+    });
+
+    /* ── Confirmación ─────────────────────────────────────────────────── */
+    let alConfirmar = null;
+    function confirmar(titulo, mensaje, textoSi, accion) {
+      $('#cf-titulo').textContent = titulo; $('#cf-mensaje').textContent = mensaje; $('#cf-si').textContent = textoSi;
+      alConfirmar = accion;
+      $('#modal-confirmar').classList.add('abierto');
+      gsap.fromTo('#caja-confirmar', { scale: .85, opacity: 0, y: 30 }, { scale: 1, opacity: 1, y: 0, duration: .5, ease: 'back.out(1.7)' });
+      gsap.fromTo('#cf-icono', { rotate: -25, scale: .5 }, { rotate: 0, scale: 1, duration: .7, ease: 'elastic.out(1, .5)', delay: .1 });
+    }
+    function cerrarConfirmar() { gsap.to('#caja-confirmar', { scale: .9, opacity: 0, duration: .2, onComplete: () => $('#modal-confirmar').classList.remove('abierto') }); }
+    $('#cf-no').addEventListener('click', cerrarConfirmar);
+    $('#cf-si').addEventListener('click', () => { const a = alConfirmar; cerrarConfirmar(); if (a) a(); });
+    $('#modal-confirmar').addEventListener('click', e => { if (e.target.id === 'modal-confirmar') cerrarConfirmar(); });
+    window.addEventListener('resize', () => moverIndicador(false));
+  </script>
+</body>
+</html>

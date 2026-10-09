@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <title>Control de Pacientes · Imagenología</title>
+  <?!= include('Cabecera') ?>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/Flip.min.js"></script>
+  <?!= include('Estilos') ?>
+  <style>
+    .tarjeta { transform-style: preserve-3d; }
+    /* Sin backdrop-filter en cada tarjeta: con 30+ tarjetas pesa mucho en iPads. */
+    .tarjeta.vidrio { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(255, 255, 255, .9); }
+    .dark .tarjeta.vidrio { background: rgba(11, 26, 44, .88); }
+    .tarjeta .velo { background: rgba(238, 244, 248, .55); }
+    .dark .tarjeta .velo { background: rgba(5, 14, 26, .55); }
+    .tarjeta .acento { height: 4px; }
+    .tarjeta.bloqueada .contenido { filter: grayscale(.6) blur(.5px); opacity: .45; pointer-events: none; }
+    .tarjeta .velo { display: none; }
+    .tarjeta.bloqueada .velo { display: flex; }
+    .tarjeta.siguiente { box-shadow: 0 0 0 2px rgba(0, 178, 227, .7), 0 20px 50px -20px rgba(0, 178, 227, .7); }
+    .motivo { border: 1px solid var(--borde); border-radius: 1rem; padding: .75rem; display: flex; gap: .65rem; align-items: center; text-align: left; font-size: .82rem; font-weight: 600; transition: all .2s ease; }
+    .motivo:hover { border-color: rgba(244, 63, 94, .5); background: rgba(244, 63, 94, .05); }
+    .motivo.activo { border-color: #F43F5E; background: linear-gradient(135deg, rgba(244, 63, 94, .16), rgba(190, 18, 60, .08)); box-shadow: 0 8px 22px -12px rgba(244, 63, 94, .9); }
+    .motivo .ic { width: 2.1rem; height: 2.1rem; border-radius: .7rem; display: grid; place-items: center; background: rgba(244, 63, 94, .12); color: #F43F5E; flex-shrink: 0; }
+    .motivo.activo .ic { background: #F43F5E; color: #fff; }
+    .anillo-progreso circle { transition: none; }
+  </style>
+</head>
+<body class="min-h-screen overflow-x-hidden">
+  <?!= incluirPlantilla('Intro') ?>
+  <?!= include('Fondo') ?>
+
+  <!-- ═══════════════ INICIO DE TURNO ═══════════════ -->
+  <div id="modal-login" class="capa-modal abierto !bg-transparent !backdrop-blur-0">
+    <div id="caja-login" class="vidrio borde-brillo rounded-[2rem] w-full max-w-md p-8 sm:p-10 relative overflow-hidden">
+      <div class="absolute -top-24 -right-24 w-64 h-64 rounded-full bg-cyan-400/20 blur-3xl"></div>
+      <div class="relative">
+        <div class="flex items-center justify-between mb-8">
+          <img src="<?!= include('LogoHospital') ?>" alt="Nuevo Hospital Rosales" class="h-14 dark:hidden">
+          <img src="<?!= include('LogoHospitalBlanco') ?>" alt="Nuevo Hospital Rosales" class="h-14 hidden dark:block">
+          <img src="<?!= include('Escudo') ?>" alt="" class="h-12 dark:hidden">
+          <img src="<?!= include('EscudoBlanco') ?>" alt="" class="h-12 hidden dark:block opacity-80">
+        </div>
+        <p class="login-anim text-xs font-bold tracking-[.3em] uppercase text-cyan-500">Imagenología · UGM</p>
+        <h1 class="login-anim font-display text-3xl sm:text-4xl font-black mt-2 leading-tight">Iniciar <span class="texto-gradiente">turno</span></h1>
+        <p class="login-anim tenue text-sm mt-2">Identifícate para llevar el control de los pacientes en tiempo real.</p>
+
+        <label class="login-anim block mt-7 text-xs font-bold uppercase tracking-widest tenue">Nombre o código</label>
+        <div class="login-anim relative mt-2">
+          <span class="absolute left-4 top-1/2 -translate-y-1/2 text-cyan-500"><i data-lucide="user-round" class="w-5 h-5"></i></span>
+          <input id="input-nombre" class="campo !pl-12 !py-3.5 text-base font-semibold" placeholder="Ej. Lic. Martínez" autocomplete="off" maxlength="40">
+        </div>
+
+        <label class="login-anim block mt-6 text-xs font-bold uppercase tracking-widest tenue">Mi sala / equipo <span class="normal-case tracking-normal font-medium">(opcional)</span></label>
+        <div id="login-salas" class="login-anim flex flex-wrap gap-2 mt-2"></div>
+
+        <button id="btn-entrar" class="login-anim btn btn-primario w-full mt-8 !py-4 text-base">
+          <i data-lucide="scan-line" class="w-5 h-5"></i> Entrar al panel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ APP ═══════════════ -->
+  <div id="app" class="relative z-10 min-h-screen flex flex-col opacity-0">
+
+    <!-- Encabezado -->
+    <header id="cabecera" class="sticky top-0 z-30 px-3 sm:px-5 pt-3">
+      <div class="vidrio rounded-2xl px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-3">
+        <div class="flex items-center gap-3 shrink-0">
+          <img src="<?!= include('LogoHospital') ?>" alt="Nuevo Hospital Rosales" class="h-9 sm:h-10 dark:hidden">
+          <img src="<?!= include('LogoHospitalBlanco') ?>" alt="Nuevo Hospital Rosales" class="h-9 sm:h-10 hidden dark:block">
+          <div class="hidden md:block w-px h-9 bg-gradient-to-b from-transparent via-cyan-500/40 to-transparent"></div>
+          <div class="hidden md:block">
+            <p class="font-display font-extrabold text-sm leading-tight">Control de Pacientes</p>
+            <p class="text-[11px] tenue font-semibold tracking-wide">Imagenología · UGM</p>
+          </div>
+        </div>
+
+        <div class="flex-1 min-w-[200px] relative order-last lg:order-none w-full lg:w-auto">
+          <span class="absolute left-4 top-1/2 -translate-y-1/2 tenue"><i data-lucide="search" class="w-4 h-4"></i></span>
+          <input id="buscador" class="campo !rounded-full !py-2.5 !pl-11 !pr-16 text-sm" placeholder="Buscar expediente, paciente, estudio o ubicación…" autocomplete="off">
+          <kbd class="hidden sm:block absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold tenue border border-current/30 rounded px-1.5 py-0.5 opacity-60">/</kbd>
+        </div>
+
+        <div class="flex items-center gap-2 ml-auto shrink-0">
+          <div class="hidden sm:flex items-center gap-2 px-3 py-2 rounded-full border" style="border-color:var(--borde)">
+            <span id="punto-conexion" class="punto-vivo"></span>
+            <span id="reloj" class="num text-xs font-bold"></span>
+          </div>
+          <button id="btn-mis" class="btn btn-fantasma !p-2.5 !rounded-full relative" title="Mis registros">
+            <i data-lucide="history" class="w-5 h-5"></i>
+            <span id="mis-cuenta" class="absolute -top-1 -right-1 min-w-[1.2rem] h-[1.2rem] px-1 rounded-full bg-cyan-500 text-white text-[10px] font-bold grid place-items-center hidden">0</span>
+          </button>
+          <button onclick="alternarTema()" class="btn btn-fantasma !p-2.5 !rounded-full" title="Cambiar tema">
+            <i data-lucide="sun" class="w-5 h-5 hidden dark:block"></i><i data-lucide="moon" class="w-5 h-5 dark:hidden"></i>
+          </button>
+          <div class="flex items-center gap-2 pl-2 border-l" style="border-color:var(--borde)">
+            <div id="avatar" class="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-400 to-rosales-700 grid place-items-center text-white font-display font-black text-sm shadow-lg shadow-cyan-500/30">?</div>
+            <div class="hidden xl:block leading-tight">
+              <p id="nombre-tecnico" class="text-sm font-bold max-w-[140px] truncate"></p>
+              <p id="sala-tecnico" class="text-[11px] tenue font-semibold"></p>
+            </div>
+            <button id="btn-salir" class="btn btn-fantasma !p-2 !rounded-full" title="Cerrar turno en este dispositivo"><i data-lucide="log-out" class="w-4 h-4"></i></button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Resumen del turno -->
+    <section class="px-3 sm:px-5 mt-4 grid grid-cols-2 lg:grid-cols-[auto_1fr_1fr_1fr_1fr] gap-3">
+      <div class="vidrio rounded-2xl p-4 flex items-center gap-4 col-span-2 lg:col-span-1">
+        <svg class="anillo-progreso w-[74px] h-[74px] -rotate-90" viewBox="0 0 80 80">
+          <circle cx="40" cy="40" r="34" fill="none" stroke="currentColor" stroke-width="8" class="text-cyan-500/15"></circle>
+          <circle id="anillo" cx="40" cy="40" r="34" fill="none" stroke="url(#gradAnillo)" stroke-width="8" stroke-linecap="round" stroke-dasharray="213.6" stroke-dashoffset="213.6"></circle>
+          <defs><linearGradient id="gradAnillo" x1="0" x2="1"><stop offset="0" stop-color="#5ED0F0"/><stop offset="1" stop-color="#10B981"/></linearGradient></defs>
+        </svg>
+        <div>
+          <p class="text-[11px] font-bold uppercase tracking-widest tenue">Avance del turno</p>
+          <p class="font-display font-black text-3xl"><span id="pct-avance" class="num">0</span><span class="text-lg tenue">%</span></p>
+          <p class="text-xs tenue"><span id="txt-avance" class="num font-bold">0 de 0</span> registrados</p>
+        </div>
+      </div>
+      <div class="vidrio rounded-2xl p-4 kpi">
+        <div class="flex items-center justify-between"><p class="text-[11px] font-bold uppercase tracking-widest tenue">Por atender</p><span class="text-cyan-500"><i data-lucide="hourglass" class="w-5 h-5"></i></span></div>
+        <p id="k-pendientes" class="num font-display font-black text-3xl mt-1 text-cyan-500">0</p>
+      </div>
+      <div class="vidrio rounded-2xl p-4 kpi">
+        <div class="flex items-center justify-between"><p class="text-[11px] font-bold uppercase tracking-widest tenue">Asistieron</p><span class="text-emerald-500"><i data-lucide="user-round-check" class="w-5 h-5"></i></span></div>
+        <p id="k-asistio" class="num font-display font-black text-3xl mt-1 text-emerald-500">0</p>
+      </div>
+      <div class="vidrio rounded-2xl p-4 kpi">
+        <div class="flex items-center justify-between"><p class="text-[11px] font-bold uppercase tracking-widest tenue">No asistieron</p><span class="text-rose-500"><i data-lucide="user-round-x" class="w-5 h-5"></i></span></div>
+        <p id="k-ausente" class="num font-display font-black text-3xl mt-1 text-rose-500">0</p>
+      </div>
+      <div class="vidrio rounded-2xl p-4 kpi">
+        <div class="flex items-center justify-between"><p class="text-[11px] font-bold uppercase tracking-widest tenue">En revisión</p><span class="text-amber-500"><i data-lucide="lock" class="w-5 h-5"></i></span></div>
+        <p id="k-revision" class="num font-display font-black text-3xl mt-1 text-amber-500">0</p>
+      </div>
+    </section>
+
+    <!-- Filtros -->
+    <section class="px-3 sm:px-5 mt-4 flex flex-col-reverse sm:flex-row sm:items-center gap-3">
+      <div id="chips" class="flex gap-2 overflow-x-auto pb-1 flex-1 min-w-0"></div>
+      <select id="orden" class="campo sm:!w-auto !py-2 !rounded-full text-xs font-bold shrink-0">
+        <option value="hora">Ordenar por hora</option>
+        <option value="nombre">Ordenar por nombre</option>
+        <option value="modalidad">Ordenar por modalidad</option>
+      </select>
+    </section>
+
+    <!-- Tarjetas -->
+    <main class="flex-1 px-3 sm:px-5 py-5">
+      <div id="grid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5 relative"></div>
+      <div id="vacio" class="hidden flex-col items-center justify-center text-center py-20">
+        <div class="relative w-40 h-40">
+          <div class="absolute inset-0 rounded-full bg-emerald-400/20 blur-2xl"></div>
+          <svg viewBox="0 0 120 120" class="relative w-40 h-40">
+            <circle id="vacio-circulo" cx="60" cy="60" r="50" fill="none" stroke="#10B981" stroke-width="6" stroke-dasharray="314" stroke-dashoffset="314" stroke-linecap="round"/>
+            <path id="vacio-check" d="M38 62 L53 77 L84 45" fill="none" stroke="#10B981" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="70" stroke-dashoffset="70"/>
+          </svg>
+        </div>
+        <h2 id="vacio-titulo" class="font-display font-black text-2xl mt-6">¡Agenda al día!</h2>
+        <p id="vacio-texto" class="tenue mt-2 max-w-sm">No hay pacientes pendientes con estos filtros.</p>
+      </div>
+    </main>
+  </div>
+
+  <!-- ═══════════════ MODAL: NO ASISTIÓ ═══════════════ -->
+  <div id="modal-ausencia" class="capa-modal">
+    <div id="caja-ausencia" class="vidrio rounded-[1.75rem] w-full max-w-2xl max-h-[92vh] overflow-y-auto">
+      <div class="p-6 sm:p-7 border-b" style="border-color:var(--borde)">
+        <div class="flex items-start gap-4">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-rose-400 to-rose-700 grid place-items-center text-white shrink-0 shadow-lg shadow-rose-500/40"><i data-lucide="user-round-x" class="w-6 h-6"></i></div>
+          <div class="min-w-0">
+            <h3 class="font-display font-black text-xl">Registrar inasistencia</h3>
+            <p id="aus-paciente" class="font-bold text-rose-500 uppercase truncate"></p>
+            <p id="aus-detalle" class="text-xs tenue mt-0.5"></p>
+          </div>
+          <button id="aus-cerrar" class="ml-auto btn btn-fantasma !p-2 !rounded-full"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+      </div>
+      <div class="p-6 sm:p-7">
+        <p class="text-xs font-bold uppercase tracking-widest tenue mb-3">¿Por qué no se realizó el estudio?</p>
+        <div id="lista-motivos" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5"></div>
+        <label class="block mt-5 text-xs font-bold uppercase tracking-widest tenue">Comentario <span id="aus-oblig" class="normal-case tracking-normal font-medium">(opcional)</span></label>
+        <textarea id="aus-comentario" rows="3" maxlength="300" class="campo mt-2 resize-none text-sm" placeholder="Detalles adicionales: quién reportó, nueva fecha, etc."></textarea>
+        <div class="flex justify-between text-[11px] tenue mt-1"><span id="aus-error" class="text-rose-500 font-semibold"></span><span><span id="aus-cont">0</span>/300</span></div>
+        <div class="flex gap-3 mt-6">
+          <button id="aus-cancelar" class="btn btn-fantasma flex-1">Cancelar</button>
+          <button id="aus-confirmar" class="btn btn-peligro flex-[2]"><i data-lucide="check" class="w-5 h-5"></i> Confirmar inasistencia</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ CAJÓN: MIS REGISTROS ═══════════════ -->
+  <div id="velo-cajon" class="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm hidden"></div>
+  <aside id="cajon" class="fixed top-0 right-0 bottom-0 z-50 w-full max-w-md vidrio !rounded-none flex flex-col">
+    <div class="p-5 border-b flex items-center gap-3" style="border-color:var(--borde)">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 to-rosales-700 grid place-items-center text-white"><i data-lucide="history" class="w-5 h-5"></i></div>
+      <div>
+        <h3 class="font-display font-black">Mis registros</h3>
+        <p class="text-xs tenue">Puedes deshacer un registro si te equivocaste.</p>
+      </div>
+      <button id="cajon-cerrar" class="ml-auto btn btn-fantasma !p-2 !rounded-full"><i data-lucide="x" class="w-4 h-4"></i></button>
+    </div>
+    <div id="lista-mis" class="flex-1 overflow-y-auto p-4 space-y-3"></div>
+  </aside>
+
+  <div id="toasts"></div>
+
+  <?!= include('Comun') ?>
+  <script>
+    gsap.registerPlugin(Flip);
+    gsap.set('#cajon', { xPercent: 105 });
+
+    /* ── Estado ───────────────────────────────────────────────────────── */
+    const S = {
+      agenda: [],          // citas del turno (desde la hoja)
+      vivo: {},            // pacientes_hoy en Firebase
+      nombre: '',
+      clave: '',
+      sala: 'TODAS',       // filtro de modalidad
+      texto: '',
+      orden: 'hora',
+      inicio: Date.now(),
+      citaAusencia: null,
+      motivo: null,
+      listo: false
+    };
+    const grid = $('#grid');
+
+    /* ── Inicio ───────────────────────────────────────────────────────── */
+    document.addEventListener('DOMContentLoaded', async () => {
+      try { S.nombre = localStorage.getItem('ugm-tecnico') || ''; S.sala = localStorage.getItem('ugm-sala') || 'TODAS'; } catch (e) {}
+      $('#input-nombre').value = S.nombre;
+      pintarSalasLogin();
+      await reproducirIntro();
+      gsap.from('#caja-login', { y: 40, opacity: 0, scale: .96, duration: .8, ease: 'expo.out' });
+      gsap.from('.login-anim', { y: 18, opacity: 0, duration: .6, stagger: .06, delay: .15, ease: 'power3.out' });
+      efectoInclinacion($('#caja-login'), 4);
+      $('#input-nombre').focus();
+    });
+
+    function pintarSalasLogin() {
+      const salas = ['TODAS', ...Object.keys(MODALIDADES).filter(m => m !== 'OTROS')];
+      $('#login-salas').innerHTML = salas.map(m => {
+        const info = m === 'TODAS' ? { icono: 'layout-dashboard' } : modalidad(m);
+        return `<button type="button" data-sala="${esc(m)}" class="chip ${S.sala === m ? 'activo' : ''}">${icono(info.icono, 'w-3.5 h-3.5')} ${m === 'TODAS' ? 'Todas' : esc(m)}</button>`;
+      }).join('');
+      refrescarIconos();
+    }
+    $('#login-salas').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-sala]'); if (!b) return;
+      S.sala = b.dataset.sala;
+      $$('#login-salas .chip').forEach(c => c.classList.toggle('activo', c === b));
+      gsap.fromTo(b, { scale: .9 }, { scale: 1, duration: .4, ease: 'back.out(3)' });
+    });
+
+    $('#input-nombre').addEventListener('keydown', (e) => { if (e.key === 'Enter') entrar(); });
+    $('#btn-entrar').addEventListener('click', entrar);
+
+    function entrar() {
+      const nombre = $('#input-nombre').value.trim().replace(/\s+/g, ' ');
+      if (nombre.length < 2) {
+        gsap.fromTo('#input-nombre', { x: -10 }, { x: 0, duration: .5, ease: 'elastic.out(1, .3)' });
+        return toast('Escribe tu nombre para iniciar el turno.', 'aviso');
+      }
+      S.nombre = nombre;
+      S.clave = claveSegura(nombre);
+      S.inicio = Date.now();
+      try { localStorage.setItem('ugm-tecnico', nombre); localStorage.setItem('ugm-sala', S.sala); } catch (e) {}
+
+      const con = db.ref('conexiones/' + S.clave);
+      con.set({ nombre, sala: S.sala, inicio: Date.now(), dispositivo: navigator.userAgent.slice(0, 80) });
+      con.onDisconnect().remove();
+
+      $('#nombre-tecnico').textContent = nombre;
+      $('#sala-tecnico').textContent = S.sala === 'TODAS' ? 'Todas las salas' : 'Sala ' + S.sala;
+      $('#avatar').textContent = iniciales(nombre);
+
+      gsap.timeline()
+        .to('#caja-login', { y: -30, opacity: 0, scale: .95, duration: .45, ease: 'power3.in' })
+        .add(() => $('#modal-login').classList.remove('abierto'))
+        .to('#app', { opacity: 1, duration: .3 })
+        .from('#cabecera', { y: -60, opacity: 0, duration: .7, ease: 'expo.out' }, '<')
+        .from('section > .vidrio', { y: 30, opacity: 0, duration: .6, stagger: .07, ease: 'power3.out' }, '-=.4');
+
+      mostrarCargando();
+      iniciarReloj($('#reloj'));
+      vigilarConexion((ok) => $('#punto-conexion').classList.toggle('desconectado', !ok));
+      cargarAgenda().then(escucharFirebase);
+    }
+
+    $('#btn-salir').addEventListener('click', () => {
+      db.ref('conexiones/' + S.clave).remove();
+      location.reload();
+    });
+
+    function mostrarCargando() {
+      grid.innerHTML = Array.from({ length: 8 }, () => `<div class="vidrio rounded-3xl p-6 h-64"><div class="skeleton h-5 w-24 rounded-full"></div><div class="skeleton h-6 w-3/4 rounded mt-6"></div><div class="skeleton h-4 w-1/2 rounded mt-4"></div><div class="skeleton h-4 w-2/3 rounded mt-3"></div><div class="skeleton h-11 w-full rounded-xl mt-10"></div></div>`).join('');
+    }
+
+    async function cargarAgenda() {
+      try {
+        S.agenda = await servidor('obtenerAgenda');
+      } catch (err) {
+        toast('No se pudo leer la agenda. Reintentando…', 'error');
+        await new Promise(r => setTimeout(r, 3000));
+        return cargarAgenda();
+      }
+      grid.innerHTML = '';
+      S.listo = true;
+      render();
+    }
+
+    function escucharFirebase() {
+      db.ref('pacientes_hoy').on('value', (s) => {
+        const antes = S.vivo;
+        S.vivo = s.val() || {};
+        // Avisar cuando un compañero registra un paciente que estoy viendo.
+        Object.keys(S.vivo).forEach(id => {
+          const n = S.vivo[id], v = antes[id];
+          if (n && n.tecnico && n.tecnico !== S.nombre && (n.estado === ESTADO.ASISTIO || n.estado === ESTADO.AUSENTE) && (!v || v.estado !== n.estado)) {
+            const el = tarjeta(id);
+            if (el && el.style.display !== 'none') gsap.to(el, { boxShadow: '0 0 0 3px #F59E0B', duration: .2, yoyo: true, repeat: 1 });
+          }
+        });
+        render();
+      });
+      db.ref('sistema/recargar').on('value', (s) => {
+        if (s.val() && s.val() > S.inicio) {
+          S.inicio = Date.now();
+          toast('El supervisor actualizó la agenda. Sincronizando…', 'info');
+          mostrarCargando();
+          cargarAgenda();
+        }
+      });
+    }
+
+    /* ── Filtros ──────────────────────────────────────────────────────── */
+    $('#buscador').addEventListener('input', (e) => { S.texto = e.target.value.trim().toLowerCase(); render(); });
+    $('#orden').addEventListener('change', (e) => { S.orden = e.target.value; render(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') { e.preventDefault(); $('#buscador').focus(); }
+      if (e.key === 'Escape') { if ($('#modal-ausencia').classList.contains('abierto')) cerrarAusencia(); cerrarCajon(); }
+    });
+    $('#chips').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-sala]'); if (!b) return;
+      S.sala = b.dataset.sala;
+      try { localStorage.setItem('ugm-sala', S.sala); } catch (err) {}
+      $('#sala-tecnico').textContent = S.sala === 'TODAS' ? 'Todas las salas' : 'Sala ' + S.sala;
+      render();
+    });
+
+    function citas() { return S.agenda.map(c => estadoVivo(c, S.vivo)); }
+    const esPendiente = (c) => c.estado === ESTADO.PENDIENTE || c.estado === ESTADO.REVISANDO || !c.estado;
+
+    function visibles(todas) {
+      return todas
+        .filter(esPendiente)
+        .filter(c => S.sala === 'TODAS' || c.modalidad === S.sala)
+        .filter(c => !S.texto || [c.expediente, c.paciente, c.estudio, c.ubicacion, c.equipo].join(' ').toLowerCase().includes(S.texto))
+        .sort((a, b) => {
+          if (S.orden === 'nombre') return a.paciente.localeCompare(b.paciente);
+          if (S.orden === 'modalidad') return a.modalidad.localeCompare(b.modalidad) || (minutosDeHora(a.hora) ?? 9999) - (minutosDeHora(b.hora) ?? 9999);
+          return (minutosDeHora(a.hora) ?? 9999) - (minutosDeHora(b.hora) ?? 9999) || a.paciente.localeCompare(b.paciente);
+        });
+    }
+
+    /* ── Render ───────────────────────────────────────────────────────── */
+    const tarjeta = (id) => grid.querySelector(`.tarjeta[data-id="${CSS.escape(id)}"]`);
+
+    function render() {
+      if (!S.listo) return;
+      const todas = citas();
+      pintarResumen(todas);
+      pintarChips(todas);
+      pintarMisRegistros(todas);
+
+      const lista = visibles(todas);
+      const ids = new Set(lista.map(c => c.id));
+      const estado = Flip.getState(grid.querySelectorAll('.tarjeta'));
+      const ahora = new Date(), minAhora = ahora.getHours() * 60 + ahora.getMinutes();
+      const siguienteId = lista.find(c => c.estado !== ESTADO.REVISANDO)?.id;
+
+      lista.forEach(c => {
+        let el = tarjeta(c.id);
+        if (!el) el = crearTarjeta(c);
+        actualizarTarjeta(el, c, minAhora, c.id === siguienteId && S.orden === 'hora');
+        el.style.display = '';
+        grid.appendChild(el);
+      });
+      const salientes = [];
+      grid.querySelectorAll('.tarjeta').forEach(el => {
+        if (!ids.has(el.dataset.id)) { el.style.display = 'none'; salientes.push(el); }
+      });
+
+      Flip.from(estado, {
+        duration: .6, ease: 'power3.inOut', absolute: true, stagger: .015, simple: true,
+        onEnter: els => gsap.fromTo(els, { opacity: 0, y: 40, scale: .9, rotateX: -12 }, { opacity: 1, y: 0, scale: 1, rotateX: 0, duration: .65, stagger: .04, ease: 'back.out(1.4)' }),
+        onLeave: els => gsap.to(els, { opacity: 0, scale: .85, duration: .35, ease: 'power2.in' }),
+        onComplete: () => salientes.forEach(el => {
+          const c = todas.find(x => x.id === el.dataset.id);
+          if (!c || !esPendiente(c)) el.remove(); // procesadas: fuera del DOM
+        })
+      });
+      refrescarIconos();
+      mostrarVacio(lista.length === 0, todas);
+    }
+
+    function crearTarjeta(c) {
+      const m = modalidad(c.modalidad);
+      const el = document.createElement('article');
+      el.className = 'tarjeta vidrio rounded-3xl overflow-hidden relative flex flex-col';
+      el.dataset.id = c.id;
+      el.innerHTML = `
+        <div class="acento bg-gradient-to-r ${m.grad}"></div>
+        <div class="contenido p-5 flex flex-col flex-1">
+          <div class="flex items-center justify-between gap-2">
+            <span class="insignia text-white bg-gradient-to-r ${m.grad} shadow-md">${icono(m.icono, 'w-3.5 h-3.5')} ${esc(c.modalidad)}</span>
+            <span class="hora insignia border num" style="border-color:var(--borde)">${icono('clock', 'w-3.5 h-3.5')} ${esc(c.hora || '--:--')}</span>
+          </div>
+          <div class="etiqueta-siguiente hidden mt-3"><span class="insignia bg-cyan-500/15 text-cyan-500">${icono('zap', 'w-3.5 h-3.5')} Siguiente en la agenda</span></div>
+          <p class="mt-4 text-[11px] font-bold tenue tracking-widest uppercase">Exp. <span class="num text-cyan-500 text-xs">${esc(c.expediente)}</span></p>
+          <h2 class="font-display font-extrabold text-lg leading-snug uppercase line-clamp-2 mt-1" title="${esc(c.paciente)}">${esc(c.paciente)}</h2>
+          <div class="mt-4 space-y-2.5 text-sm flex-1">
+            <div class="flex gap-2.5"><span class="w-7 h-7 rounded-lg grid place-items-center shrink-0" style="background:${m.color}22;color:${m.color}">${icono('stethoscope', 'w-4 h-4')}</span><div class="min-w-0"><p class="text-[10px] font-bold uppercase tracking-widest tenue">Estudio</p><p class="font-semibold leading-tight line-clamp-2" title="${esc(c.estudio)}">${esc(c.estudio || '—')}</p></div></div>
+            <div class="flex gap-2.5"><span class="w-7 h-7 rounded-lg grid place-items-center shrink-0 bg-amber-500/15 text-amber-500">${icono('map-pin', 'w-4 h-4')}</span><div class="min-w-0"><p class="text-[10px] font-bold uppercase tracking-widest tenue">Ubicación</p><p class="font-semibold leading-tight truncate" title="${esc(c.ubicacion)}">${esc(c.ubicacion || '—')}</p></div></div>
+            ${c.equipo ? `<div class="flex gap-2.5"><span class="w-7 h-7 rounded-lg grid place-items-center shrink-0 bg-indigo-500/15 text-indigo-400">${icono('monitor', 'w-4 h-4')}</span><div class="min-w-0"><p class="text-[10px] font-bold uppercase tracking-widest tenue">Equipo</p><p class="font-semibold leading-tight truncate" title="${esc(c.equipo)}">${esc(c.equipo)}</p></div></div>` : ''}
+          </div>
+          <div class="grid grid-cols-2 gap-3 mt-5 pt-4 border-t" style="border-color:var(--borde)">
+            <button data-accion="asistio" class="btn btn-exito !py-3">${icono('check', 'w-5 h-5')} Asistió</button>
+            <button data-accion="ausente" class="btn !py-3 border border-rose-500/40 text-rose-500 hover:bg-rose-500 hover:text-white">${icono('x', 'w-5 h-5')} No asistió</button>
+          </div>
+        </div>
+        <div class="velo absolute inset-0 items-center justify-center flex-col gap-2 text-center p-6">
+          <div class="w-12 h-12 rounded-2xl bg-amber-500 text-white grid place-items-center shadow-lg shadow-amber-500/40 animate-pulse">${icono('lock', 'w-6 h-6')}</div>
+          <p class="font-bold text-sm"><span class="quien"></span> está registrando</p>
+          <p class="text-xs tenue">Esta tarjeta se libera si cancela.</p>
+        </div>`;
+      efectoInclinacion(el, 5);
+      return el;
+    }
+
+    function actualizarTarjeta(el, c, minAhora, esSiguiente) {
+      const bloqueada = c.estado === ESTADO.REVISANDO && c.bloqueado_por && c.bloqueado_por !== S.nombre;
+      el.classList.toggle('bloqueada', !!bloqueada);
+      if (bloqueada) el.querySelector('.quien').textContent = c.bloqueado_por;
+      el.classList.toggle('siguiente', esSiguiente);
+      el.querySelector('.etiqueta-siguiente').classList.toggle('hidden', !esSiguiente);
+      const min = minutosDeHora(c.hora), hora = el.querySelector('.hora');
+      hora.classList.remove('text-amber-500', 'text-cyan-500', '!border-amber-500/50', '!border-cyan-500/60');
+      if (min !== null && minAhora - min > 20) hora.classList.add('text-amber-500', '!border-amber-500/50');
+      else if (min !== null && Math.abs(minAhora - min) <= 20) hora.classList.add('text-cyan-500', '!border-cyan-500/60');
+    }
+
+    function pintarResumen(todas) {
+      const n = (e) => todas.filter(c => c.estado === e).length;
+      const asistio = n(ESTADO.ASISTIO), ausente = n(ESTADO.AUSENTE), revision = n(ESTADO.REVISANDO);
+      const total = todas.length, hechos = asistio + ausente, pct = total ? Math.round(hechos / total * 100) : 0;
+      contar($('#k-pendientes'), total - hechos);
+      contar($('#k-asistio'), asistio);
+      contar($('#k-ausente'), ausente);
+      contar($('#k-revision'), revision);
+      contar($('#pct-avance'), pct);
+      $('#txt-avance').textContent = `${hechos} de ${total}`;
+      gsap.to('#anillo', { strokeDashoffset: 213.6 * (1 - pct / 100), duration: 1.2, ease: 'power3.out' });
+    }
+
+    function pintarChips(todas) {
+      const pend = todas.filter(esPendiente);
+      const cuenta = {};
+      pend.forEach(c => { cuenta[c.modalidad] = (cuenta[c.modalidad] || 0) + 1; });
+      const salas = ['TODAS', ...Object.keys(MODALIDADES).filter(m => cuenta[m] || m === S.sala)];
+      const html = salas.map(m => {
+        const info = m === 'TODAS' ? { icono: 'layout-dashboard' } : modalidad(m);
+        const k = m === 'TODAS' ? pend.length : (cuenta[m] || 0);
+        return `<button data-sala="${esc(m)}" class="chip ${S.sala === m ? 'activo' : ''}">${icono(info.icono, 'w-3.5 h-3.5')} ${m === 'TODAS' ? 'Todas' : esc(m)} <span class="cuenta">${k}</span></button>`;
+      }).join('');
+      if ($('#chips').dataset.html !== html) { $('#chips').innerHTML = html; $('#chips').dataset.html = html; }
+    }
+
+    function mostrarVacio(vacio, todas) {
+      const caja = $('#vacio');
+      if (!vacio) { caja.classList.add('hidden'); caja.classList.remove('flex'); caja.dataset.visto = ''; return; }
+      const terminado = todas.length > 0 && !todas.some(esPendiente);
+      $('#vacio-titulo').textContent = !todas.length ? 'Aún no hay agenda cargada' : terminado ? '¡Agenda completada!' : 'Sin resultados';
+      $('#vacio-texto').textContent = !todas.length ? 'Cuando el supervisor cargue el Excel del día, los pacientes aparecerán aquí automáticamente.' : terminado ? 'Todos los pacientes del turno ya fueron registrados. ¡Excelente trabajo!' : 'No hay pacientes pendientes con estos filtros.';
+      caja.classList.remove('hidden'); caja.classList.add('flex');
+      if (caja.dataset.visto) return;
+      caja.dataset.visto = '1';
+      gsap.timeline()
+        .fromTo(caja, { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: .5 })
+        .fromTo('#vacio-circulo', { strokeDashoffset: 314 }, { strokeDashoffset: 0, duration: .9, ease: 'power2.inOut' }, '<')
+        .fromTo('#vacio-check', { strokeDashoffset: 70 }, { strokeDashoffset: 0, duration: .5, ease: 'power3.out' });
+      if (terminado) { const r = caja.getBoundingClientRect(); explosion(r.left + r.width / 2, r.top + 90, '#10B981', 40); }
+    }
+
+    /* ── Acciones sobre tarjetas ──────────────────────────────────────── */
+    grid.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-accion]'); if (!b) return;
+      const id = b.closest('.tarjeta').dataset.id;
+      const c = citas().find(x => x.id === id); if (!c) return;
+      if (b.dataset.accion === 'asistio') {
+        const r = b.getBoundingClientRect();
+        explosion(r.left + r.width / 2, r.top + r.height / 2, '#10B981');
+        registrar(c, ESTADO.ASISTIO, '', '');
+      } else abrirAusencia(c);
+    });
+
+    /** Marca la cita en Firebase con una transacción: si otro ya la tomó, no la pisa. */
+    async function registrar(c, estado, motivo, comentario) {
+      const ref = db.ref('pacientes_hoy/' + c.id);
+      const el = tarjeta(c.id);
+      if (el) {
+        gsap.to(el, { boxShadow: `0 0 0 3px ${estado === ESTADO.ASISTIO ? '#10B981' : '#F43F5E'}, 0 30px 60px -20px ${estado === ESTADO.ASISTIO ? '#10B981' : '#F43F5E'}`, y: -10, duration: .25 });
+      }
+      let resultado;
+      try {
+        resultado = await ref.transaction(actual => {
+          if (actual && (actual.estado === ESTADO.ASISTIO || actual.estado === ESTADO.AUSENTE)) return;
+          if (actual && actual.estado === ESTADO.REVISANDO && actual.bloqueado_por && actual.bloqueado_por !== S.nombre) return;
+          return { estado, tecnico: S.nombre, timestamp: Date.now(), motivo: motivo || '', comentario: comentario || '', modalidad: c.modalidad, expediente: c.expediente };
+        });
+      } catch (err) {
+        toast('Sin conexión: no se pudo registrar. Intenta de nuevo.', 'error');
+        if (el) gsap.to(el, { boxShadow: 'none', y: 0, duration: .3 });
+        return;
+      }
+      ref.onDisconnect().cancel();
+      if (!resultado.committed) {
+        const v = resultado.snapshot.val() || {};
+        toast(`Este paciente ya fue registrado por ${v.tecnico || v.bloqueado_por || 'otro técnico'}.`, 'aviso');
+        if (el) gsap.to(el, { boxShadow: 'none', y: 0, duration: .3 });
+        return;
+      }
+
+      db.ref('logs').push({ tecnico: S.nombre, accion: estado, id: c.id, expediente: c.expediente, paciente: c.paciente, estudio: c.estudio, modalidad: c.modalidad, observacion: [motivo, comentario].filter(Boolean).join(' — '), tiempo: Date.now() });
+      guardarEnHoja(c, estado, motivo, comentario);
+      toast(estado === ESTADO.ASISTIO ? `${c.paciente} · asistencia registrada` : `${c.paciente} · inasistencia registrada`, estado === ESTADO.ASISTIO ? 'ok' : 'error', {
+        accion: 'Deshacer', duracion: 7000, alAccionar: () => deshacer(c)
+      });
+    }
+
+    function guardarEnHoja(c, estado, motivo, comentario, intento = 1) {
+      servidor('guardarAsistencia', c.id, estado, motivo, comentario, S.nombre)
+        .then(r => { if (r && r.conflicto) toast(r.mensaje, 'aviso'); })
+        .catch(() => {
+          if (intento < 4) setTimeout(() => guardarEnHoja(c, estado, motivo, comentario, intento + 1), 2000 * intento);
+          else toast(`No se pudo guardar ${c.expediente} en la hoja. Avísale al supervisor.`, 'error', { duracion: 10000 });
+        });
+    }
+
+    async function deshacer(c) {
+      await db.ref('pacientes_hoy/' + c.id).set({ estado: ESTADO.PENDIENTE, restaurado: Date.now(), por: S.nombre });
+      const local = S.agenda.find(x => x.id === c.id); if (local) local.estado = ESTADO.PENDIENTE;
+      db.ref('logs').push({ tecnico: S.nombre, accion: 'Deshizo', id: c.id, expediente: c.expediente, paciente: c.paciente, modalidad: c.modalidad, tiempo: Date.now() });
+      servidor('restaurarPaciente', c.id).catch(() => toast('El cambio no llegó a la hoja; el supervisor puede restaurarlo.', 'aviso'));
+      toast(`${c.paciente} volvió a la agenda.`, 'info');
+    }
+
+    /* ── Modal de inasistencia ────────────────────────────────────────── */
+    $('#lista-motivos').innerHTML = MOTIVOS.map(m => `<button type="button" class="motivo" data-motivo="${esc(m.valor)}"><span class="ic">${icono(m.icono, 'w-4 h-4')}</span>${esc(m.valor)}</button>`).join('');
+    $('#lista-motivos').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-motivo]'); if (!b) return;
+      S.motivo = b.dataset.motivo;
+      $$('#lista-motivos .motivo').forEach(x => x.classList.toggle('activo', x === b));
+      gsap.fromTo(b.querySelector('.ic'), { rotate: -20, scale: .7 }, { rotate: 0, scale: 1, duration: .5, ease: 'back.out(3)' });
+      $('#aus-oblig').textContent = S.motivo === 'Otro' ? '(obligatorio)' : '(opcional)';
+      $('#aus-error').textContent = '';
+      if (S.motivo === 'Otro') $('#aus-comentario').focus();
+    });
+    $('#aus-comentario').addEventListener('input', (e) => { $('#aus-cont').textContent = e.target.value.length; });
+
+    async function abrirAusencia(c) {
+      const ref = db.ref('pacientes_hoy/' + c.id);
+      let r;
+      try {
+        r = await ref.transaction(actual => {
+          if (actual && (actual.estado === ESTADO.ASISTIO || actual.estado === ESTADO.AUSENTE)) return;
+          if (actual && actual.estado === ESTADO.REVISANDO && actual.bloqueado_por && actual.bloqueado_por !== S.nombre) return;
+          return { estado: ESTADO.REVISANDO, bloqueado_por: S.nombre, desde: Date.now() };
+        });
+      } catch (err) { return toast('Sin conexión con el servidor en vivo.', 'error'); }
+      if (!r.committed) { const v = r.snapshot.val() || {}; return toast(`${v.bloqueado_por || v.tecnico || 'Otro técnico'} ya está trabajando con este paciente.`, 'aviso'); }
+      ref.onDisconnect().set({ estado: ESTADO.PENDIENTE, liberado: true }); // si se cae la conexión, se libera
+
+      S.citaAusencia = c; S.motivo = null;
+      $('#aus-paciente').textContent = c.paciente;
+      $('#aus-detalle').textContent = `Exp. ${c.expediente} · ${c.estudio} · ${c.hora || ''}`;
+      $('#aus-comentario').value = ''; $('#aus-cont').textContent = '0'; $('#aus-error').textContent = ''; $('#aus-oblig').textContent = '(opcional)';
+      $$('#lista-motivos .motivo').forEach(x => x.classList.remove('activo'));
+      $('#modal-ausencia').classList.add('abierto');
+      gsap.fromTo('#caja-ausencia', { y: 60, opacity: 0, scale: .94 }, { y: 0, opacity: 1, scale: 1, duration: .55, ease: 'expo.out' });
+      gsap.fromTo('#lista-motivos .motivo', { y: 14, opacity: 0 }, { y: 0, opacity: 1, duration: .4, stagger: .03, delay: .1, ease: 'power3.out', clearProps: 'transform,opacity' });
+    }
+
+    function cerrarAusencia(liberar = true) {
+      const c = S.citaAusencia;
+      if (c && liberar) {
+        const ref = db.ref('pacientes_hoy/' + c.id);
+        ref.onDisconnect().cancel();
+        ref.transaction(a => (a && a.estado === ESTADO.REVISANDO && a.bloqueado_por === S.nombre) ? { estado: ESTADO.PENDIENTE } : undefined);
+      }
+      S.citaAusencia = null;
+      gsap.to('#caja-ausencia', { y: 40, opacity: 0, scale: .96, duration: .25, ease: 'power2.in', onComplete: () => $('#modal-ausencia').classList.remove('abierto') });
+    }
+    $('#aus-cancelar').addEventListener('click', () => cerrarAusencia());
+    $('#aus-cerrar').addEventListener('click', () => cerrarAusencia());
+    $('#modal-ausencia').addEventListener('click', (e) => { if (e.target.id === 'modal-ausencia') cerrarAusencia(); });
+
+    $('#aus-confirmar').addEventListener('click', () => {
+      const c = S.citaAusencia; if (!c) return;
+      const comentario = $('#aus-comentario').value.trim();
+      if (!S.motivo) { $('#aus-error').textContent = 'Selecciona un motivo.'; return gsap.fromTo('#lista-motivos', { x: -8 }, { x: 0, duration: .5, ease: 'elastic.out(1, .3)' }); }
+      if (S.motivo === 'Otro' && comentario.length < 3) { $('#aus-error').textContent = 'Describe el motivo en el comentario.'; return $('#aus-comentario').focus(); }
+      const r = $('#aus-confirmar').getBoundingClientRect();
+      explosion(r.left + r.width / 2, r.top + r.height / 2, '#F43F5E', 16);
+      cerrarAusencia(false);
+      registrar(c, ESTADO.AUSENTE, S.motivo, comentario);
+    });
+
+    /* ── Cajón "Mis registros" ────────────────────────────────────────── */
+    function pintarMisRegistros(todas) {
+      const mios = todas.filter(c => c.tecnico === S.nombre && (c.estado === ESTADO.ASISTIO || c.estado === ESTADO.AUSENTE))
+        .sort((a, b) => (b.ts || 0) - (a.ts || 0));
+      const k = $('#mis-cuenta');
+      k.textContent = mios.length; k.classList.toggle('hidden', !mios.length);
+      $('#lista-mis').innerHTML = mios.length ? mios.map(c => {
+        const ok = c.estado === ESTADO.ASISTIO;
+        return `<div class="vidrio rounded-2xl p-4 flex gap-3 items-start">
+          <span class="w-9 h-9 rounded-xl grid place-items-center shrink-0 ${ok ? 'bg-emerald-500/15 text-emerald-500' : 'bg-rose-500/15 text-rose-500'}">${icono(ok ? 'check' : 'x', 'w-5 h-5')}</span>
+          <div class="min-w-0 flex-1">
+            <p class="font-bold text-sm truncate uppercase">${esc(c.paciente)}</p>
+            <p class="text-xs tenue truncate">Exp. ${esc(c.expediente)} · ${esc(c.estudio)}</p>
+            ${!ok && c.motivo ? `<p class="text-xs mt-1 text-rose-500 font-semibold">${icono(iconoMotivo(c.motivo), 'w-3 h-3 inline')} ${esc(c.motivo)}</p>` : ''}
+            ${c.comentario ? `<p class="text-xs tenue italic mt-0.5">“${esc(c.comentario)}”</p>` : ''}
+          </div>
+          <div class="text-right shrink-0">
+            <p class="num text-xs tenue">${c.ts ? horaDe(c.ts) : ''}</p>
+            <button data-deshacer="${esc(c.id)}" class="mt-1 text-xs font-bold text-cyan-500 hover:underline inline-flex items-center gap-1">${icono('undo-2', 'w-3 h-3')} Deshacer</button>
+          </div>
+        </div>`;
+      }).join('') : `<div class="text-center tenue py-16">${icono('list-checks', 'w-10 h-10 mx-auto opacity-50')}<p class="mt-3 text-sm">Aún no has registrado pacientes.</p></div>`;
+    }
+    $('#lista-mis').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-deshacer]'); if (!b) return;
+      const c = citas().find(x => x.id === b.dataset.deshacer);
+      if (c) deshacer(c);
+    });
+
+    $('#btn-mis').addEventListener('click', () => {
+      refrescarIconos();
+      $('#velo-cajon').classList.remove('hidden');
+      gsap.fromTo('#velo-cajon', { opacity: 0 }, { opacity: 1, duration: .3 });
+      gsap.to('#cajon', { xPercent: 0, duration: .55, ease: 'expo.out' });
+      gsap.fromTo('#lista-mis > div', { x: 40, opacity: 0 }, { x: 0, opacity: 1, stagger: .04, duration: .4, delay: .15, clearProps: 'transform,opacity' });
+    });
+    function cerrarCajon() {
+      gsap.to('#cajon', { xPercent: 105, duration: .4, ease: 'power3.in' });
+      gsap.to('#velo-cajon', { opacity: 0, duration: .3, onComplete: () => $('#velo-cajon').classList.add('hidden') });
+    }
+    $('#cajon-cerrar').addEventListener('click', cerrarCajon);
+    $('#velo-cajon').addEventListener('click', cerrarCajon);
+
+    // Refrescar indicadores de "atrasada / ahora" cada minuto.
+    setInterval(() => S.listo && render(), 60000);
+  </script>
+</body>
+</html>

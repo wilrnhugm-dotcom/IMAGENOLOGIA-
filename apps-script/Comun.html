@@ -1,0 +1,241 @@
+<script>
+  /* ==========================================================================
+   *  Código compartido por las vistas de Técnico y Supervisor
+   * ========================================================================== */
+
+  const FIREBASE_CONFIG = { databaseURL: 'https://imagenologia-ugm-default-rtdb.firebaseio.com/' };
+  if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+  const db = firebase.database();
+
+  const ESTADO = { PENDIENTE: 'Pendiente', ASISTIO: 'Asistió', AUSENTE: 'Ausente', REVISANDO: 'Revisando' };
+
+  // Catálogo de modalidades: icono (Lucide), color y degradado de cada sala.
+  const MODALIDADES = {
+    'RAYOS X':          { corto: 'RX',    icono: 'bone',            color: '#00B2E3', grad: 'from-cyan-400 to-sky-600' },
+    'TAC':              { corto: 'TAC',   icono: 'disc-3',          color: '#8B5CF6', grad: 'from-violet-400 to-indigo-600' },
+    'RM':               { corto: 'RM',    icono: 'magnet',          color: '#EC4899', grad: 'from-pink-400 to-fuchsia-600' },
+    'ULTRASONIDO':      { corto: 'USG',   icono: 'audio-waveform',  color: '#14B8A6', grad: 'from-teal-300 to-emerald-600' },
+    'MAMOGRAFÍA':       { corto: 'MAMO',  icono: 'ribbon',          color: '#F472B6', grad: 'from-rose-300 to-pink-600' },
+    'FLUOROSCOPÍA':     { corto: 'FLUO',  icono: 'monitor',         color: '#F59E0B', grad: 'from-amber-300 to-orange-600' },
+    'DENSITOMETRÍA':    { corto: 'DMO',   icono: 'person-standing', color: '#84CC16', grad: 'from-lime-300 to-green-600' },
+    'INTERVENCIONISMO': { corto: 'INTV',  icono: 'syringe',         color: '#EF4444', grad: 'from-red-400 to-rose-700' },
+    'OTROS':            { corto: 'OTRO',  icono: 'scan',            color: '#64748B', grad: 'from-slate-400 to-slate-600' }
+  };
+  const modalidad = (m) => MODALIDADES[m] || MODALIDADES.OTROS;
+
+  // Motivos de inasistencia (lo que el técnico elige al marcar "No asistió").
+  const MOTIVOS = [
+    { valor: 'No se presentó a la cita',            icono: 'user-x' },
+    { valor: 'Llegó tarde / fuera de horario',      icono: 'clock-alert' },
+    { valor: 'Sin preparación adecuada',            icono: 'clipboard-x' },
+    { valor: 'Paciente inestable / trasladado',     icono: 'ambulance' },
+    { valor: 'Contraindicación médica',             icono: 'shield-alert' },
+    { valor: 'Falla o mantenimiento del equipo',    icono: 'wrench' },
+    { valor: 'Documentación u orden incompleta',    icono: 'file-x' },
+    { valor: 'Reprogramado',                        icono: 'calendar-clock' },
+    { valor: 'Paciente rechazó el estudio',         icono: 'hand' },
+    { valor: 'Otro',                                icono: 'message-square-more' }
+  ];
+  const iconoMotivo = (m) => (MOTIVOS.find(x => x.valor === m) || MOTIVOS[MOTIVOS.length - 1]).icono;
+
+  /* ── Utilidades ───────────────────────────────────────────────────────── */
+
+  const $ = (sel, raiz = document) => raiz.querySelector(sel);
+  const $$ = (sel, raiz = document) => Array.from(raiz.querySelectorAll(sel));
+
+  function esc(v) {
+    return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function icono(nombre, clases = 'w-4 h-4') { return `<i data-lucide="${nombre}" class="${clases}"></i>`; }
+  function refrescarIconos() { if (window.lucide) lucide.createIcons({ attrs: { 'stroke-width': 2 } }); }
+
+  /** Firebase no admite . # $ [ ] / en las claves. */
+  function claveSegura(texto) { return String(texto).trim().replace(/[.#$\[\]\/]/g, '_').slice(0, 60) || 'anon'; }
+
+  function iniciales(nombre) {
+    return String(nombre || '?').trim().split(/\s+/).slice(0, 2).map(p => p[0]).join('').toUpperCase();
+  }
+
+  function horaDe(ts) {
+    const d = new Date(ts);
+    return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+  }
+
+  /** Convierte "08:30", "8:30 a. m.", "14:05:00" en minutos desde medianoche. */
+  function minutosDeHora(h) {
+    const m = String(h || '').toLowerCase().match(/(\d{1,2})[:.](\d{2})/);
+    if (!m) return null;
+    let hh = +m[1];
+    const pm = /p\.?\s?m/.test(h), am = /a\.?\s?m/.test(h);
+    if (pm && hh < 12) hh += 12;
+    if (am && hh === 12) hh = 0;
+    return hh * 60 + (+m[2]);
+  }
+
+  /** google.script.run como promesa. */
+  function servidor(funcion, ...args) {
+    return new Promise((resolve, reject) => {
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[funcion](...args);
+    });
+  }
+
+  /** Estado vigente: lo que diga Firebase (en vivo) o, si no hay, lo de la hoja. */
+  function estadoVivo(cita, vivo) {
+    const v = vivo && vivo[cita.id];
+    if (v && v.estado) return { ...cita, estado: v.estado, tecnico: v.tecnico || cita.tecnico, motivo: v.motivo ?? cita.motivo, comentario: v.comentario ?? cita.comentario, ts: v.timestamp || null, bloqueado_por: v.bloqueado_por || null };
+    return { ...cita, ts: cita.registrado ? Date.parse(cita.registrado.replace(' ', 'T')) || null : null };
+  }
+
+  /* ── Tema ─────────────────────────────────────────────────────────────── */
+
+  function alternarTema() {
+    const raiz = document.documentElement;
+    gsap.to('body', { opacity: 0, duration: .18, onComplete: () => {
+      raiz.classList.toggle('dark');
+      try { localStorage.setItem('ugm-tema', raiz.classList.contains('dark') ? 'dark' : 'light'); } catch (e) {}
+      document.dispatchEvent(new CustomEvent('tema-cambiado'));
+      gsap.to('body', { opacity: 1, duration: .3 });
+    } });
+  }
+
+  /* ── Notificaciones ───────────────────────────────────────────────────── */
+
+  function toast(mensaje, tipo = 'ok', opciones = {}) {
+    const estilos = {
+      ok:    { icono: 'circle-check', color: '#10B981' },
+      error: { icono: 'circle-x',     color: '#F43F5E' },
+      info:  { icono: 'sparkles',     color: '#00B2E3' },
+      aviso: { icono: 'shield-alert', color: '#F59E0B' }
+    }[tipo] || {};
+    let cont = $('#toasts');
+    if (!cont) { cont = document.createElement('div'); cont.id = 'toasts'; document.body.appendChild(cont); }
+    const t = document.createElement('div');
+    t.className = 'toast vidrio';
+    t.style.borderLeft = `4px solid ${estilos.color}`;
+    t.innerHTML = `
+      <span class="shrink-0 grid place-items-center w-9 h-9 rounded-xl" style="background:${estilos.color}22;color:${estilos.color}">${icono(estilos.icono, 'w-5 h-5')}</span>
+      <span class="text-sm font-semibold flex-1">${esc(mensaje)}</span>
+      ${opciones.accion ? `<button class="btn btn-fantasma !py-1.5 !px-3 text-xs">${esc(opciones.accion)}</button>` : ''}`;
+    cont.appendChild(t);
+    refrescarIconos();
+    let cerrado = false;
+    const cerrar = () => {
+      if (cerrado) return; cerrado = true;
+      gsap.to(t, { x: 60, opacity: 0, height: 0, padding: 0, marginTop: -10, duration: .35, ease: 'power2.in', onComplete: () => t.remove() });
+    };
+    if (opciones.accion) t.querySelector('button').onclick = () => { opciones.alAccionar && opciones.alAccionar(); cerrar(); };
+    gsap.fromTo(t, { x: 80, opacity: 0, scale: .9 }, { x: 0, opacity: 1, scale: 1, duration: .5, ease: 'back.out(1.6)' });
+    setTimeout(cerrar, opciones.duracion || 4200);
+    return cerrar;
+  }
+
+  /* ── Animaciones ──────────────────────────────────────────────────────── */
+
+  /** Anima un número desde su valor actual hasta `valor`. */
+  function contar(el, valor, sufijo = '') {
+    if (!el) return;
+    const desde = parseFloat(el.dataset.valor || '0');
+    el.dataset.valor = valor;
+    const obj = { v: desde };
+    gsap.to(obj, {
+      v: valor, duration: 1.1, ease: 'power3.out',
+      onUpdate: () => { el.textContent = Math.round(obj.v) + sufijo; }
+    });
+    if (desde !== valor) gsap.fromTo(el, { scale: 1.18 }, { scale: 1, duration: .6, ease: 'elastic.out(1, .5)' });
+  }
+
+  /** Explosión de partículas en un punto (celebración al marcar asistencia). */
+  function explosion(x, y, color = '#10B981', cantidad = 22) {
+    for (let i = 0; i < cantidad; i++) {
+      const p = document.createElement('div');
+      p.className = 'particula';
+      const tam = 4 + Math.random() * 8;
+      p.style.cssText = `left:${x}px;top:${y}px;width:${tam}px;height:${tam}px;background:${i % 3 ? color : '#5ED0F0'};box-shadow:0 0 10px ${color}`;
+      if (i % 4 === 0) p.style.borderRadius = '2px';
+      document.body.appendChild(p);
+      const ang = Math.random() * Math.PI * 2, dist = 50 + Math.random() * 110;
+      gsap.to(p, {
+        x: Math.cos(ang) * dist, y: Math.sin(ang) * dist + 30, rotation: Math.random() * 360,
+        opacity: 0, scale: .2, duration: .9 + Math.random() * .5, ease: 'power3.out', onComplete: () => p.remove()
+      });
+    }
+  }
+
+  /** Efecto de onda al hacer clic en cualquier botón .btn */
+  document.addEventListener('pointerdown', (e) => {
+    const b = e.target.closest('.btn');
+    if (!b || b.disabled) return;
+    const r = b.getBoundingClientRect(), d = Math.max(r.width, r.height) * 2;
+    const o = document.createElement('span');
+    o.className = 'ripple';
+    o.style.cssText = `width:${d}px;height:${d}px;left:${e.clientX - r.left - d / 2}px;top:${e.clientY - r.top - d / 2}px`;
+    b.appendChild(o);
+    gsap.to(o, { scale: 1, opacity: 0, duration: .6, ease: 'power2.out', onComplete: () => o.remove() });
+  });
+
+  /** Brillo que recorre los botones principales al pasar el mouse. */
+  document.addEventListener('mouseover', (e) => {
+    const b = e.target.closest('.btn-primario, .btn-exito, .btn-peligro');
+    if (!b || b.dataset.brillando) return;
+    let s = b.querySelector('.brillo');
+    if (!s) { s = document.createElement('span'); s.className = 'brillo'; b.appendChild(s); }
+    b.dataset.brillando = '1';
+    gsap.fromTo(s, { xPercent: -120 }, { xPercent: 120, duration: .8, ease: 'power2.inOut', onComplete: () => delete b.dataset.brillando });
+  });
+
+  /** Inclinación 3D sutil siguiendo el cursor. */
+  function efectoInclinacion(el, fuerza = 6) {
+    if (matchMedia('(pointer: coarse)').matches) return;
+    el.addEventListener('mousemove', (e) => {
+      const r = el.getBoundingClientRect();
+      const px = (e.clientX - r.left) / r.width - .5, py = (e.clientY - r.top) / r.height - .5;
+      gsap.to(el, { rotateY: px * fuerza, rotateX: -py * fuerza, transformPerspective: 900, duration: .4, ease: 'power2.out' });
+    });
+    el.addEventListener('mouseleave', () => gsap.to(el, { rotateY: 0, rotateX: 0, duration: .6, ease: 'power3.out' }));
+  }
+
+  /** Fondo vivo: auroras que flotan y una línea de escaneo tipo radiografía. */
+  function animarFondo() {
+    gsap.to('.aurora.a1', { x: '12vw', y: '8vh', duration: 18, repeat: -1, yoyo: true, ease: 'sine.inOut' });
+    gsap.to('.aurora.a2', { x: '-10vw', y: '-12vh', duration: 22, repeat: -1, yoyo: true, ease: 'sine.inOut' });
+    gsap.to('.aurora.a3', { x: '-18vw', y: '10vh', scale: 1.3, duration: 26, repeat: -1, yoyo: true, ease: 'sine.inOut' });
+    gsap.to('.escaner', { y: () => innerHeight + 320, duration: 7, repeat: -1, ease: 'none', repeatDelay: 3 });
+  }
+
+  /** Intro con el logo del hospital. Devuelve una promesa al terminar. */
+  function reproducirIntro() {
+    return new Promise((resolve) => {
+      const intro = $('#intro');
+      if (!intro) return resolve();
+      const tl = gsap.timeline({ onComplete: () => { intro.remove(); resolve(); } });
+      tl.from('#intro .anillo', { scale: 0, opacity: 0, duration: 1.2, stagger: .15, ease: 'expo.out' })
+        .from('#intro-escudo', { y: -30, opacity: 0, duration: .6, ease: 'power3.out' }, .1)
+        .from('#intro-logo', { clipPath: 'inset(0 100% 0 0)', duration: 1.1, ease: 'power4.inOut' }, .25)
+        .from('#intro-logo', { filter: 'blur(12px)', duration: .9 }, .25)
+        .from('#intro-titulo', { y: 20, opacity: 0, letterSpacing: '0.6em', duration: .8, ease: 'power3.out' }, .8)
+        .to('#intro .barra > div', { width: '100%', duration: 1.1, ease: 'power2.inOut' }, .6)
+        .to('#intro .anillo', { scale: 1.6, opacity: 0, duration: .8, stagger: .05 }, 1.8)
+        .to(intro, { clipPath: 'circle(0% at 50% 50%)', duration: .9, ease: 'power4.inOut' }, 2.0);
+      intro.style.clipPath = 'circle(150% at 50% 50%)';
+      gsap.to('#intro .anillo', { rotation: 360, duration: 8, repeat: -1, ease: 'none' });
+    });
+  }
+
+  /** Reloj en vivo para el encabezado. */
+  function iniciarReloj(el) {
+    const tick = () => {
+      const d = new Date();
+      el.textContent = d.toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    };
+    tick();
+    setInterval(tick, 1000);
+  }
+
+  /** Indicador de conexión con Firebase. */
+  function vigilarConexion(alCambiar) {
+    db.ref('.info/connected').on('value', (s) => alCambiar(!!s.val()));
+  }
+
+  document.addEventListener('DOMContentLoaded', () => { refrescarIconos(); animarFondo(); });
+</script>

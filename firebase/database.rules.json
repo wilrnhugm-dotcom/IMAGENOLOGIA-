@@ -1,0 +1,29 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "pacientes_hoy": {
+      ".read": true,
+      ".write": "!newData.exists()",
+      "$id": {
+        ".write": true,
+        ".validate": "newData.child('estado').val() == 'Pendiente' || newData.child('estado').val() == 'Revisando' || newData.child('estado').val() == 'Asistió' || newData.child('estado').val() == 'Ausente'"
+      }
+    },
+    "logs": {
+      ".read": true,
+      ".write": "!newData.exists()",
+      "$log": {
+        ".write": "!data.exists() || !newData.exists()"
+      }
+    },
+    "conexiones": {
+      ".read": true,
+      "$tecnico": { ".write": true }
+    },
+    "sistema": {
+      ".read": true,
+      "recargar": { ".write": true, ".validate": "newData.isNumber()" }
+    }
+  }
+}
