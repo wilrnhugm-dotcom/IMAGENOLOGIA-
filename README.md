@@ -58,6 +58,7 @@ El sistema original (Código.gs, Admin.html, Tecnico.html, Supervisor.html) func
 - ✅ **Detección automática de la modalidad** a partir del equipo y del nombre del estudio.
 - ✅ **Carga del Excel con vista previa**: se detectan las columnas por su encabezado (con respaldo al formato antiguo), se pueden ajustar a mano y se **omiten los duplicados**.
 - ✅ **Historial único** (hoja "Historial") con la fecha de cierre, para sacar **reportes por rango de fechas**.
+- ✅ **Códigos de acceso**: los técnicos ya no escriben su nombre; entran con un **código que el supervisor les asigna** (sección *Accesos*). El panel de supervisores también pide código. El servidor valida el código en cada acción, pone el nombre del técnico (nadie puede hacerse pasar por otro) y, si se desactiva un código, esa persona sale al instante. Al recargar la página siempre se vuelve a pedir el código.
 - ✅ **Botón "Generar reporte"** siempre visible para el supervisor → vista previa + **Excel** (4 hojas con gráficos), **PDF/impresión** (con logos y firmas) y **CSV**.
 
 **Diseño**
@@ -104,6 +105,7 @@ docs/capturas/        Capturas de pantalla
 5. Ya **no se necesita** el servicio avanzado *Drive API* (el Excel ahora se lee en el navegador). Puedes quitarlo.
 6. **Implementar → Administrar implementaciones → ✏️ Editar → Versión: Nueva versión → Implementar.** Así la URL sigue siendo la misma.
 7. La primera vez Google pedirá **autorizar** permisos nuevos (Drive, para guardar los reportes en la carpeta *"Reportes Imagenología UGM"*).
+8. Abre el link de **supervisores**: como aún no hay ningún supervisor, aparece **Configuración inicial** para crear tu nombre y tu código. Luego, en **Accesos**, asigna un código a cada técnico.
 
 **Enlaces**
 
@@ -114,8 +116,9 @@ docs/capturas/        Capturas de pantalla
 
 ## 5. Uso diario
 
+0. **Accesos (una sola vez por persona)**: Supervisor → **Accesos** → escribe un código (o pulsa **Generar**) → **Siguiente** → nombre del técnico y tipo de acceso → **Asignar código**. Entrégale el código al técnico. Desde la misma lista puedes ver, desactivar, reactivar o eliminar códigos. Los códigos se guardan en la hoja privada **Accesos**.
 1. **Supervisor → Administración → Cargar agenda del día**: arrastra el Excel. Revisa la vista previa (pacientes detectados y modalidades) y pulsa **Cargar**. Los iPads se actualizan solos.
-2. **Técnicos**: escriben su nombre, eligen su sala (opcional) y marcan cada paciente:
+2. **Técnicos**: escriben su **código**, eligen su sala (opcional) y marcan cada paciente:
    - **Asistió** → un toque.
    - **No asistió** → eligen el motivo y, si quieren, un comentario.
    - ¿Se equivocaron? **Deshacer** en el aviso o en *Mis registros* (icono del reloj).
@@ -152,7 +155,9 @@ Desde **Generar reporte** (arriba a la derecha) o el menú **Reportes**:
 
 ## 8. Seguridad (importante)
 
-La base de Firebase **no tiene autenticación**: cualquiera que conozca la URL puede leer y escribir. Como allí viajan **nombres y expedientes de pacientes**, se recomienda:
+**Lo que ya está protegido:** para entrar a cualquiera de las dos vistas se necesita un código válido. El servidor de Apps Script verifica el código (la sesión) en cada acción: cargar agenda, registrar pacientes, reportes, cierre de turno y gestión de códigos (estas últimas solo con código de supervisor). La sesión vive solo en memoria (al recargar se pide de nuevo), dura 6 horas y se renueva con cada uso. Equivocarse de código tiene una espera de ~1 s para dificultar que alguien los adivine; usa códigos de **6 o más** caracteres.
+
+**Lo que falta:** la base de Firebase **no tiene autenticación**: cualquiera que conozca la URL puede leer y escribir. Como allí viajan **nombres y expedientes de pacientes**, se recomienda:
 
 1. En la consola de Firebase → *Realtime Database → Reglas*, publicar `firebase/database.rules.json`. Bloquea todo lo que no sea parte del sistema y valida los estados. **No sustituye a un inicio de sesión**, pero reduce el riesgo.
 2. Lo ideal (siguiente fase): activar **Firebase Authentication** (por ejemplo, inicio de sesión anónimo con dominio restringido o cuentas institucionales) y exigir `auth != null` en las reglas.

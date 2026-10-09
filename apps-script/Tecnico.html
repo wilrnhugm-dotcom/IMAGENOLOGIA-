@@ -43,15 +43,19 @@
         </div>
         <p class="login-anim text-xs font-bold tracking-[.3em] uppercase text-cyan-500">Imagenología · UGM</p>
         <h1 class="login-anim font-display text-3xl sm:text-4xl font-black mt-2 leading-tight">Iniciar <span class="texto-gradiente">turno</span></h1>
-        <p class="login-anim tenue text-sm mt-2">Identifícate para llevar el control de los pacientes en tiempo real.</p>
+        <p class="login-anim tenue text-sm mt-2">Ingresa el código de acceso que te asignó tu supervisor.</p>
 
-        <label class="login-anim block mt-7 text-xs font-bold uppercase tracking-widest tenue">Nombre o código</label>
+        <label for="input-codigo" class="login-anim block mt-7 text-xs font-bold uppercase tracking-widest tenue">Código de acceso</label>
         <div class="login-anim relative mt-2">
-          <span class="absolute left-4 top-1/2 -translate-y-1/2 text-cyan-500"><i data-lucide="user-round" class="w-5 h-5"></i></span>
-          <input id="input-nombre" class="campo !pl-12 !py-3.5 text-base font-semibold" placeholder="Ej. Lic. Martínez" autocomplete="off" maxlength="40">
+          <span class="absolute left-4 top-1/2 -translate-y-1/2 text-cyan-500"><i data-lucide="key-round" class="w-5 h-5"></i></span>
+          <input id="input-codigo" class="campo campo-codigo oculto !pl-12 !pr-12 !py-3.5 text-base" placeholder="Ingresa tu código" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12">
+          <button type="button" id="ver-codigo" class="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 tenue hover:text-cyan-500" title="Mostrar u ocultar código">
+            <i data-lucide="eye" class="w-5 h-5"></i>
+          </button>
         </div>
+        <p id="error-login" class="login-anim error-login mt-2"></p>
 
-        <label class="login-anim block mt-6 text-xs font-bold uppercase tracking-widest tenue">Mi sala / equipo <span class="normal-case tracking-normal font-medium">(opcional)</span></label>
+        <label class="login-anim block mt-4 text-xs font-bold uppercase tracking-widest tenue">Mi sala / equipo <span class="normal-case tracking-normal font-medium">(opcional)</span></label>
         <div id="login-salas" class="login-anim flex flex-wrap gap-2 mt-2"></div>
 
         <button id="btn-entrar" class="login-anim btn btn-primario w-full mt-8 !py-4 text-base">
@@ -235,14 +239,14 @@
 
     /* ── Inicio ───────────────────────────────────────────────────────── */
     document.addEventListener('DOMContentLoaded', async () => {
-      try { S.nombre = localStorage.getItem('ugm-tecnico') || ''; S.sala = localStorage.getItem('ugm-sala') || 'TODAS'; } catch (e) {}
-      $('#input-nombre').value = S.nombre;
+      try { S.sala = localStorage.getItem('ugm-sala') || 'TODAS'; } catch (e) {}
+      $('#input-codigo').value = ''; // nunca queda un código o nombre precargado
       pintarSalasLogin();
       await reproducirIntro();
       gsap.from('#caja-login', { y: 40, opacity: 0, scale: .96, duration: .8, ease: 'expo.out' });
       gsap.from('.login-anim', { y: 18, opacity: 0, duration: .6, stagger: .06, delay: .15, ease: 'power3.out' });
       efectoInclinacion($('#caja-login'), 4);
-      $('#input-nombre').focus();
+      $('#input-codigo').focus();
     });
 
     function pintarSalasLogin() {
@@ -260,19 +264,43 @@
       gsap.fromTo(b, { scale: .9 }, { scale: 1, duration: .4, ease: 'back.out(3)' });
     });
 
-    $('#input-nombre').addEventListener('keydown', (e) => { if (e.key === 'Enter') entrar(); });
+    $('#input-codigo').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\s+/g, ''); $('#error-login').textContent = ''; });
+    $('#input-codigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') entrar(); });
+    $('#ver-codigo').addEventListener('click', () => {
+      const oculto = $('#input-codigo').classList.toggle('oculto');
+      $('#ver-codigo').innerHTML = icono(oculto ? 'eye' : 'eye-off', 'w-5 h-5');
+      $('#input-codigo').focus();
+    });
     $('#btn-entrar').addEventListener('click', entrar);
 
-    function entrar() {
-      const nombre = $('#input-nombre').value.trim().replace(/\s+/g, ' ');
-      if (nombre.length < 2) {
-        gsap.fromTo('#input-nombre', { x: -10 }, { x: 0, duration: .5, ease: 'elastic.out(1, .3)' });
-        return toast('Escribe tu nombre para iniciar el turno.', 'aviso');
-      }
+    function errorLogin(mensaje) {
+      $('#error-login').textContent = mensaje;
+      gsap.fromTo('#input-codigo', { x: -12 }, { x: 0, duration: .55, ease: 'elastic.out(1, .3)' });
+      $('#input-codigo').select();
+    }
+
+    async function entrar() {
+      const codigo = $('#input-codigo').value.trim();
+      if (codigo.length < 4) return errorLogin('Escribe tu código de acceso.');
+      const btn = $('#btn-entrar'), html = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = `${icono('refresh-cw', 'w-5 h-5 animate-spin')} Verificando…`;
+      let r;
+      try { r = await servidor('iniciarSesion', codigo, ''); }
+      catch (err) { r = { exito: false, mensaje: 'No hay conexión con el servidor. Intenta de nuevo.' }; }
+      btn.disabled = false; btn.innerHTML = html;
+      if (!r.exito) return errorLogin(r.mensaje);
+      $('#input-codigo').value = '';
+      Object.assign(SESION, { token: r.token, nombre: r.nombre, rol: r.rol });
+      iniciarTurno();
+    }
+
+    let relojIniciado = false;
+    function iniciarTurno() {
+      const nombre = SESION.nombre;
       S.nombre = nombre;
       S.clave = claveSegura(nombre);
       S.inicio = Date.now();
-      try { localStorage.setItem('ugm-tecnico', nombre); localStorage.setItem('ugm-sala', S.sala); } catch (e) {}
+      try { localStorage.setItem('ugm-sala', S.sala); } catch (e) {}
 
       const con = db.ref('conexiones/' + S.clave);
       con.set({ nombre, sala: S.sala, inicio: Date.now(), dispositivo: navigator.userAgent.slice(0, 80) });
@@ -286,19 +314,43 @@
         .to('#caja-login', { y: -30, opacity: 0, scale: .95, duration: .45, ease: 'power3.in' })
         .add(() => $('#modal-login').classList.remove('abierto'))
         .to('#app', { opacity: 1, duration: .3 })
-        .from('#cabecera', { y: -60, opacity: 0, duration: .7, ease: 'expo.out' }, '<')
-        .from('section > .vidrio', { y: 30, opacity: 0, duration: .6, stagger: .07, ease: 'power3.out' }, '-=.4');
+        .fromTo('#cabecera', { y: -60, opacity: 0 }, { y: 0, opacity: 1, duration: .7, ease: 'expo.out' }, '<')
+        .fromTo('section > .vidrio', { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: .6, stagger: .07, ease: 'power3.out' }, '-=.4');
+      toast(`Bienvenido, ${nombre}`, 'ok');
 
       mostrarCargando();
-      iniciarReloj($('#reloj'));
-      vigilarConexion((ok) => $('#punto-conexion').classList.toggle('desconectado', !ok));
+      if (!relojIniciado) {
+        relojIniciado = true;
+        iniciarReloj($('#reloj'));
+        vigilarConexion((ok) => $('#punto-conexion').classList.toggle('desconectado', !ok));
+      }
       cargarAgenda().then(escucharFirebase);
     }
 
-    $('#btn-salir').addEventListener('click', () => {
-      db.ref('conexiones/' + S.clave).remove();
-      location.reload();
-    });
+    /** Cierra el turno en este dispositivo y vuelve a pedir el código (sin recargar la página). */
+    function volverAlLogin(mensaje) {
+      if (SESION.token && !mensaje) servidor('cerrarSesion', SESION.token).catch(() => {});
+      if (S.clave) db.ref('conexiones/' + S.clave).remove();
+      db.ref('pacientes_hoy').off();
+      db.ref('sistema/recargar').off();
+      Object.assign(SESION, { token: null, nombre: '', rol: '' });
+      Object.assign(S, { listo: false, agenda: [], vivo: {}, nombre: '', clave: '', texto: '' });
+      if ($('#modal-ausencia').classList.contains('abierto')) cerrarAusencia(false);
+      cerrarCajon();
+      $('#buscador').value = '';
+      grid.innerHTML = '';
+      $('#vacio').classList.add('hidden'); $('#vacio').classList.remove('flex');
+      $('#error-login').textContent = mensaje || '';
+      gsap.to('#app', { opacity: 0, duration: .3 });
+      $('#modal-login').classList.add('abierto');
+      gsap.fromTo('#caja-login', { y: 40, opacity: 0, scale: .96 }, { y: 0, opacity: 1, scale: 1, duration: .6, ease: 'expo.out' });
+      $('#input-codigo').focus();
+    }
+    function alVencerSesion() {
+      if (!SESION.token) return;
+      volverAlLogin('Tu sesión venció o tu código fue desactivado. Ingresa tu código de nuevo.');
+    }
+    $('#btn-salir').addEventListener('click', () => volverAlLogin());
 
     function mostrarCargando() {
       grid.innerHTML = Array.from({ length: 8 }, () => `<div class="vidrio rounded-3xl p-6 h-64"><div class="skeleton h-5 w-24 rounded-full"></div><div class="skeleton h-6 w-3/4 rounded mt-6"></div><div class="skeleton h-4 w-1/2 rounded mt-4"></div><div class="skeleton h-4 w-2/3 rounded mt-3"></div><div class="skeleton h-11 w-full rounded-xl mt-10"></div></div>`).join('');
@@ -306,8 +358,9 @@
 
     async function cargarAgenda() {
       try {
-        S.agenda = await servidor('obtenerAgenda');
+        S.agenda = await api('obtenerAgenda');
       } catch (err) {
+        if (!SESION.token) return; // la sesión venció: ya se volvió a pedir el código
         toast('No se pudo leer la agenda. Reintentando…', 'error');
         await new Promise(r => setTimeout(r, 3000));
         return cargarAgenda();
@@ -633,9 +686,15 @@
     }
 
     function guardarEnHoja(c, estado, motivo, comentario, intento = 1) {
-      servidor('guardarAsistencia', c.id, estado, motivo, comentario, S.nombre)
+      api('guardarAsistencia', c.id, estado, motivo, comentario)
         .then(r => { if (r && r.conflicto) toast(r.mensaje, 'aviso'); })
         .catch(() => {
+          if (!SESION.token) {
+            // La sesión venció (o desactivaron el código): se deshace el registro en vivo
+            // para que Firebase y la hoja no queden distintos.
+            db.ref('pacientes_hoy/' + c.id).set({ estado: ESTADO.PENDIENTE, revertido: Date.now() });
+            return;
+          }
           if (intento < 4) setTimeout(() => guardarEnHoja(c, estado, motivo, comentario, intento + 1), 2000 * intento);
           else toast(`No se pudo guardar ${c.expediente} en la hoja. Avísale al supervisor.`, 'error', { duracion: 10000 });
         });
@@ -645,7 +704,7 @@
       await db.ref('pacientes_hoy/' + c.id).set({ estado: ESTADO.PENDIENTE, restaurado: Date.now(), por: S.nombre });
       const local = S.agenda.find(x => x.id === c.id); if (local) local.estado = ESTADO.PENDIENTE;
       db.ref('logs').push({ tecnico: S.nombre, accion: 'Deshizo', id: c.id, expediente: c.expediente, paciente: c.paciente, modalidad: c.modalidad, tiempo: Date.now() });
-      servidor('restaurarPaciente', c.id).catch(() => toast('El cambio no llegó a la hoja; el supervisor puede restaurarlo.', 'aviso'));
+      api('restaurarPaciente', c.id).catch(() => toast('El cambio no llegó a la hoja; el supervisor puede restaurarlo.', 'aviso'));
       toast(`${c.paciente} volvió a la agenda.`, 'info');
     }
 

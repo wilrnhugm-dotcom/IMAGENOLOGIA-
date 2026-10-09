@@ -114,6 +114,12 @@
   .campo::placeholder { color: var(--tenue); opacity: .8; }
   select.campo option { color: #0F2438; }
 
+  /* ── Campo de código de acceso (oculto como contraseña, sin que el navegador lo guarde) ── */
+  .campo-codigo { font-family: 'JetBrains Mono', monospace; letter-spacing: .35em; text-transform: uppercase; font-weight: 700; }
+  .campo-codigo.oculto { -webkit-text-security: disc; text-security: disc; }
+  .campo-codigo::placeholder { letter-spacing: normal; text-transform: none; font-family: Inter, sans-serif; font-weight: 500; }
+  .error-login { color: #F43F5E; font-size: .8rem; font-weight: 600; min-height: 1.2rem; }
+
   /* ── Modales y toasts ── */
   .capa-modal { position: fixed; inset: 0; z-index: 60; display: none; align-items: center; justify-content: center; padding: 1rem; background: rgba(3, 10, 20, .62); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
   .capa-modal.abierto { display: flex; }

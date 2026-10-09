@@ -97,6 +97,24 @@
     return hh * 60 + (+m[2]);
   }
 
+  /* ── Sesión ─────────────────────────────────────────────────────────────
+     El código de acceso se valida en el servidor, que devuelve un token.
+     El token vive solo en memoria: al recargar la página se pide el código otra vez. */
+  const SESION = { token: null, nombre: '', rol: '', codigo: '' };
+
+  /** Llama al servidor enviando el token de la sesión. */
+  function api(funcion, ...args) {
+    return servidor(funcion, SESION.token, ...args).catch(err => {
+      const m = String((err && err.message) || err);
+      if (m.includes('SESION_VENCIDA')) {
+        if (typeof alVencerSesion === 'function') alVencerSesion();
+      } else if (m.includes('SIN_PERMISO')) {
+        toast('Tu código no tiene permiso para esta acción.', 'error');
+      }
+      throw err;
+    });
+  }
+
   /** google.script.run como promesa. */
   function servidor(funcion, ...args) {
     return new Promise((resolve, reject) => {
