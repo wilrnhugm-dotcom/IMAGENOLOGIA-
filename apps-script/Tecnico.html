@@ -24,6 +24,11 @@
     .motivo .ic { width: 2.1rem; height: 2.1rem; border-radius: .7rem; display: grid; place-items: center; background: rgba(244, 63, 94, .12); color: #F43F5E; flex-shrink: 0; }
     .motivo.activo .ic { background: #F43F5E; color: #fff; }
     .anillo-progreso circle { transition: none; }
+    .area-btn { display: flex; align-items: center; justify-content: center; gap: .5rem; padding: .6rem .7rem; min-height: 3rem; border-radius: .9rem; font-weight: 800; font-size: .85rem; color: var(--tenue); transition: all .25s ease; position: relative; }
+    .area-btn:hover { color: var(--texto); background: rgba(0, 178, 227, .06); }
+    .area-btn.activo { color: #fff; box-shadow: 0 10px 24px -12px rgba(0, 0, 0, .6); }
+    .area-btn .cuenta { font-family: 'JetBrains Mono', monospace; font-size: .72rem; padding: .05rem .45rem; border-radius: 999px; background: rgba(0, 178, 227, .15); }
+    .area-btn.activo .cuenta { background: rgba(255, 255, 255, .25); }
   </style>
 </head>
 <body class="min-h-screen overflow-x-hidden">
@@ -55,7 +60,10 @@
         </div>
         <p id="error-login" class="login-anim error-login mt-2"></p>
 
-        <label class="login-anim block mt-4 text-xs font-bold uppercase tracking-widest tenue">Mi sala / equipo <span class="normal-case tracking-normal font-medium">(opcional)</span></label>
+        <label class="login-anim block mt-3 text-xs font-bold uppercase tracking-widest tenue">Mi área</label>
+        <div id="login-areas" class="login-anim grid grid-cols-3 gap-2 mt-2"></div>
+
+        <label class="login-anim block mt-5 text-xs font-bold uppercase tracking-widest tenue">Mi sala / equipo <span class="normal-case tracking-normal font-medium">(opcional)</span></label>
         <div id="login-salas" class="login-anim flex flex-wrap gap-2 mt-2"></div>
 
         <button id="btn-entrar" class="login-anim btn btn-primario w-full mt-8 !py-4 text-base">
@@ -143,8 +151,13 @@
       </div>
     </section>
 
+    <!-- Área (Fase 1 / Fase 2) -->
+    <section class="px-3 sm:px-5 mt-4">
+      <div id="areas" class="vidrio rounded-2xl p-1.5 grid grid-cols-3 gap-1.5"></div>
+    </section>
+
     <!-- Filtros -->
-    <section class="px-3 sm:px-5 mt-4 flex flex-col-reverse sm:flex-row sm:items-center gap-3">
+    <section class="px-3 sm:px-5 mt-3 flex flex-col-reverse sm:flex-row sm:items-center gap-3">
       <div id="chips" class="flex gap-2 overflow-x-auto pb-1 flex-1 min-w-0"></div>
       <select id="orden" class="campo sm:!w-auto !py-2 !rounded-full text-xs font-bold shrink-0">
         <option value="hora">Ordenar por hora</option>
@@ -234,6 +247,7 @@
       nombre: '',
       clave: '',
       sala: 'TODAS',       // filtro de modalidad
+      area: 'TODAS',       // F1 (Fase 1), CENTRAL (Fase 2) o TODAS
       texto: '',
       orden: 'hora',
       inicio: Date.now(),
@@ -246,7 +260,9 @@
 
     /* ── Inicio ───────────────────────────────────────────────────────── */
     document.addEventListener('DOMContentLoaded', async () => {
-      try { S.sala = localStorage.getItem('ugm-sala') || 'TODAS'; } catch (e) {}
+      try { S.sala = localStorage.getItem('ugm-sala') || 'TODAS'; S.area = localStorage.getItem('ugm-area') || 'TODAS'; } catch (e) {}
+      if (!AREAS[S.area]) S.area = 'TODAS';
+      pintarAreasLogin();
       $('#input-codigo').value = ''; // nunca queda un código o nombre precargado
       pintarSalasLogin();
       await reproducirIntro();
@@ -254,6 +270,56 @@
       gsap.from('.login-anim', { y: 18, opacity: 0, duration: .6, stagger: .06, delay: .15, ease: 'power3.out' });
       efectoInclinacion($('#caja-login'), 4);
       $('#input-codigo').focus();
+    });
+
+    /* ── Áreas: la Fase de la ubicación decide el área ──────────────────── */
+    const AREAS = {
+      TODAS:   { nombre: 'Ambas áreas',          corto: 'Ambas',   icono: 'layers',     grad: 'linear-gradient(135deg,#00B2E3,#10567F)' },
+      F1:      { nombre: 'Imagenología F1',      corto: 'F1',      icono: 'building-2', color: '#00B2E3', grad: 'linear-gradient(135deg,#22D3EE,#0284C7)' },
+      CENTRAL: { nombre: 'Imagenología Central', corto: 'Central', icono: 'hospital',   color: '#8B5CF6', grad: 'linear-gradient(135deg,#A78BFA,#4F46E5)' }
+    };
+    /** "… / Consultorio 7 / Fase: 1" → F1 · "Fase: 2" → CENTRAL · sin fase → '' */
+    function areaDe(c) {
+      const m = /fase\s*[:#.\-]?\s*(\d+)/i.exec(c.ubicacion || '') || /fase\s*[:#.\-]?\s*(\d+)/i.exec([c.estudio, c.equipo].join(' '));
+      return !m ? '' : m[1] === '1' ? 'F1' : m[1] === '2' ? 'CENTRAL' : '';
+    }
+    /** Pacientes del área elegida (los que no traen fase aparecen en ambas para no perderlos). */
+    function enArea(lista) { return S.area === 'TODAS' ? lista : lista.filter(c => c.area === S.area || !c.area); }
+    function textoUbicacion() { return AREAS[S.area].nombre + ' · ' + (S.sala === 'TODAS' ? 'todas las salas' : S.sala); }
+
+    function botonArea(clave, cuenta) {
+      const a = AREAS[clave], activo = S.area === clave;
+      // En pantallas angostas el nombre va en dos líneas ("Imagenología" + "F1") para que no se corte.
+      const nombre = clave === 'TODAS'
+        ? `<span class="font-black">${a.corto}</span>`
+        : `<span class="flex flex-col sm:flex-row sm:gap-1 leading-tight text-left"><span class="text-[10px] sm:text-[0.85rem] font-bold opacity-80 sm:opacity-100">Imagenología</span><span class="font-black">${a.corto}</span></span>`;
+      return `<button type="button" data-area="${clave}" class="area-btn ${activo ? 'activo' : ''}" style="${activo ? 'background:' + a.grad : ''}">${icono(a.icono, 'w-4 h-4 shrink-0')}${nombre}${cuenta === undefined ? '' : `<span class="cuenta">${cuenta}</span>`}</button>`;
+    }
+    function pintarAreasLogin() { $('#login-areas').innerHTML = ['F1', 'CENTRAL', 'TODAS'].map(k => botonArea(k).replace(/sm:/g, 'xx:')).join(''); }
+    function pintarAreas(todas) {
+      const pend = todas.filter(esPendiente);
+      const cuenta = { TODAS: pend.length, F1: pend.filter(c => c.area !== 'CENTRAL').length, CENTRAL: pend.filter(c => c.area !== 'F1').length };
+      const html = ['F1', 'CENTRAL', 'TODAS'].map(k => botonArea(k, cuenta[k])).join('');
+      if ($('#areas').dataset.html !== html) { $('#areas').innerHTML = html; $('#areas').dataset.html = html; }
+    }
+    function elegirArea(clave) {
+      if (!AREAS[clave] || clave === S.area) return false;
+      S.area = clave;
+      try { localStorage.setItem('ugm-area', clave); } catch (e) {}
+      return true;
+    }
+    const rebote = (el) => el && gsap.fromTo(el, { scale: .92 }, { scale: 1, duration: .45, ease: 'back.out(3)' });
+    $('#login-areas').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-area]'); if (!b) return;
+      elegirArea(b.dataset.area); pintarAreasLogin();
+      rebote($(`#login-areas [data-area="${b.dataset.area}"]`));
+    });
+    $('#areas').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-area]'); if (!b || !elegirArea(b.dataset.area)) return;
+      $('#sala-tecnico').textContent = textoUbicacion();
+      S.limite = PAGINA;
+      pintar(); // inmediato, para animar el botón ya activo
+      rebote($(`#areas [data-area="${b.dataset.area}"]`));
     });
 
     function pintarSalasLogin() {
@@ -307,14 +373,14 @@
       S.nombre = nombre;
       S.clave = claveSegura(nombre);
       S.inicio = Date.now();
-      try { localStorage.setItem('ugm-sala', S.sala); } catch (e) {}
+      try { localStorage.setItem('ugm-sala', S.sala); localStorage.setItem('ugm-area', S.area); } catch (e) {}
 
       const con = db.ref('conexiones/' + S.clave);
       con.set({ nombre, sala: S.sala, inicio: Date.now(), dispositivo: navigator.userAgent.slice(0, 80) });
       con.onDisconnect().remove();
 
       $('#nombre-tecnico').textContent = nombre;
-      $('#sala-tecnico').textContent = S.sala === 'TODAS' ? 'Todas las salas' : 'Sala ' + S.sala;
+      $('#sala-tecnico').textContent = textoUbicacion();
       $('#avatar').textContent = iniciales(nombre);
 
       gsap.timeline()
@@ -366,6 +432,7 @@
     async function cargarAgenda() {
       try {
         S.agenda = await api('obtenerAgenda');
+        S.agenda.forEach(c => { c.area = areaDe(c); });
       } catch (err) {
         if (!SESION.token) return; // la sesión venció: ya se volvió a pedir el código
         toast('No se pudo leer la agenda. Reintentando…', 'error');
@@ -418,7 +485,7 @@
       const b = e.target.closest('[data-sala]'); if (!b) return;
       S.sala = b.dataset.sala;
       try { localStorage.setItem('ugm-sala', S.sala); } catch (err) {}
-      $('#sala-tecnico').textContent = S.sala === 'TODAS' ? 'Todas las salas' : 'Sala ' + S.sala;
+      $('#sala-tecnico').textContent = textoUbicacion();
       S.limite = PAGINA;
       render();
     });
@@ -463,11 +530,13 @@
 
     function pintar() {
       const todas = citas();
-      pintarResumen(todas);
-      pintarChips(todas);
+      const delArea = enArea(todas); // el técnico ve y cuenta solo su área
+      pintarAreas(todas);
+      pintarResumen(delArea);
+      pintarChips(delArea);
       pintarMisRegistros(todas);
 
-      const total = visibles(todas);
+      const total = visibles(delArea);
       const lista = total.slice(0, S.limite);
       S.totalVisibles = total.length;
       const ids = lista.map(c => c.id), idsSet = new Set(ids);
@@ -511,7 +580,7 @@
         if (primeras.length) gsap.fromTo(primeras, { opacity: 0, y: 30, scale: .95 }, { opacity: 1, y: 0, scale: 1, duration: .45, stagger: .03, ease: 'back.out(1.4)', clearProps: 'opacity,transform' });
       }
       $('#mas').textContent = total.length > lista.length ? `Mostrando ${lista.length} de ${total.length} · desliza para ver más` : '';
-      mostrarVacio(total.length === 0, todas);
+      mostrarVacio(total.length === 0, delArea);
       requestAnimationFrame(revisarCargarMas);
     }
 
@@ -556,7 +625,10 @@
         <div class="acento bg-gradient-to-r ${m.grad}"></div>
         <div class="contenido p-5 flex flex-col flex-1">
           <div class="flex items-center justify-between gap-2">
-            <span class="insignia text-white bg-gradient-to-r ${m.grad} shadow-md">${icono(m.icono, 'w-3.5 h-3.5')} ${esc(c.modalidad)}</span>
+            <div class="flex items-center gap-1.5 flex-wrap min-w-0">
+              <span class="insignia text-white bg-gradient-to-r ${m.grad} shadow-md">${icono(m.icono, 'w-3.5 h-3.5')} ${esc(c.modalidad)}</span>
+              ${c.area ? `<span class="insignia" style="background:${AREAS[c.area].color}22;color:${AREAS[c.area].color}">${icono(AREAS[c.area].icono, 'w-3.5 h-3.5')} ${AREAS[c.area].corto}</span>` : `<span class="insignia bg-amber-500/15 text-amber-500">${icono('map-pin', 'w-3.5 h-3.5')} Sin fase</span>`}
+            </div>
             <span class="hora insignia border num" style="border-color:var(--borde)">${icono('clock', 'w-3.5 h-3.5')} ${esc(c.hora || '--:--')}</span>
           </div>
           <div class="etiqueta-siguiente hidden mt-3"><span class="insignia bg-cyan-500/15 text-cyan-500">${icono('zap', 'w-3.5 h-3.5')} Siguiente en la agenda</span></div>
