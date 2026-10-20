@@ -23,7 +23,6 @@ var CONFIG = {
   HOJA_HISTORIAL: 'Historial',
   HOJA_ACCESOS: 'Accesos',          // códigos de acceso de técnicos y supervisores
   HORAS_SESION: 6,                  // la sesión se renueva sola mientras se use
-  CARPETA_REPORTES: 'Reportes Imagenología UGM',
   ZONA_HORARIA: 'America/El_Salvador'
 };
 
@@ -338,9 +337,11 @@ function obtenerDatosReporte(token, filtros) {
 }
 
 /**
- * Crea un Excel con el reporte (Resumen, Asistieron, No asistieron, Pendientes)
- * en la carpeta de Drive "Reportes Imagenología UGM" y devuelve el enlace de
- * descarga .xlsx. `filas` llega ya filtrado desde el navegador.
+ * Crea el reporte de Excel (Resumen, Asistieron, No asistieron, Pendientes) y
+ * lo devuelve como archivo .xlsx (base64) para que el navegador lo descargue
+ * directo a la PC. La hoja temporal de Google Sheets que se usa para armarlo
+ * se envía a la papelera al terminar: no queda nada abierto en Sheets.
+ * `filas` llega ya filtrado desde el navegador.
  */
 function generarReporteExcel(token, filas, info) {
   sesion_(token, ROLES.SUPERVISOR);
@@ -433,13 +434,25 @@ function generarReporteExcel(token, filas, info) {
   hojaDetalle_(ss, 'Pendientes', columnas.slice(0, 8), pendiente.map(function (p) { return base(p).slice(0, 8); }), '#D97706');
 
   SpreadsheetApp.flush();
-  moverACarpeta_(ss.getId());
-  return {
-    exito: true,
-    url: 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export?format=xlsx',
-    urlHoja: ss.getUrl(),
-    mensaje: 'Reporte generado: ' + nombre
-  };
+  var id = ss.getId();
+  try {
+    var resp = UrlFetchApp.fetch('https://docs.google.com/spreadsheets/d/' + id + '/export?format=xlsx', {
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      muteHttpExceptions: true
+    });
+    if (resp.getResponseCode() !== 200) {
+      return { exito: false, mensaje: 'No se pudo convertir el reporte a Excel (código ' + resp.getResponseCode() + ').' };
+    }
+    return {
+      exito: true,
+      nombreArchivo: nombre + '.xlsx',
+      base64: Utilities.base64Encode(resp.getBlob().getBytes()),
+      mensaje: 'Reporte generado: ' + nombre
+    };
+  } finally {
+    // La hoja temporal ya no hace falta: el Excel se guarda en la PC.
+    try { DriveApp.getFileById(id).setTrashed(true); } catch (err) { console.warn('No se pudo limpiar la hoja temporal: ' + err); }
+  }
 }
 
 function hojaDetalle_(ss, nombre, columnas, datos, color) {
@@ -456,16 +469,6 @@ function estiloTabla_(rango, color) {
   rango.setBorder(true, true, true, true, true, true, '#CBD5E1', SpreadsheetApp.BorderStyle.SOLID);
   rango.offset(0, 0, 1).setBackground(color).setFontColor('#FFFFFF').setFontWeight('bold');
   if (rango.getNumRows() > 1) rango.offset(1, 0, rango.getNumRows() - 1).applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, false, false);
-}
-
-function moverACarpeta_(idArchivo) {
-  try {
-    var it = DriveApp.getFoldersByName(CONFIG.CARPETA_REPORTES);
-    var carpeta = it.hasNext() ? it.next() : DriveApp.createFolder(CONFIG.CARPETA_REPORTES);
-    DriveApp.getFileById(idArchivo).moveTo(carpeta);
-  } catch (err) {
-    console.warn('No se pudo mover el reporte a la carpeta: ' + err);
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

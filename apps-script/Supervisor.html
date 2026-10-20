@@ -942,11 +942,22 @@
       try {
         const r = await api('generarReporteExcel', S.reporte.filas, { titulo: S.reporte.titulo, generadoPor: S.reporte.autor });
         if (!r.exito) return toast(r.mensaje, 'aviso');
-        toast('Reporte listo. Descargando…', 'ok', { accion: 'Abrir en Sheets', duracion: 9000, alAccionar: () => window.open(r.urlHoja, '_blank') });
-        window.open(r.url, '_blank');
+        descargarBase64(r.base64, r.nombreArchivo, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        toast('Excel descargado en tu PC: ' + r.nombreArchivo, 'ok', { duracion: 6000 });
       } catch (err) { toast('No se pudo crear el Excel.', 'error'); }
       finally { btn.disabled = false; btn.innerHTML = html; refrescarIconos(); }
     });
+
+    // Convierte el .xlsx que manda el servidor (base64) en una descarga directa.
+    function descargarBase64(base64, nombre, tipo) {
+      const bin = atob(base64), bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([bytes], { type: tipo }));
+      const a = document.createElement('a');
+      a.href = url; a.download = nombre;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    }
 
     $('#rp-csv').addEventListener('click', () => {
       if (!S.reporte) return;
