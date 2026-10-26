@@ -268,6 +268,25 @@
                 <button id="hr-cargar" class="btn btn-primario flex-1 !py-3"><i data-lucide="cloud-upload" class="w-5 h-5"></i> Cargar <span id="hr-n" class="num"></span> pacientes</button>
               </div>
             </div>
+
+            <!-- Vaciar base: solo con los dos permisos (cargar + reporte) -->
+            <div id="hr-vaciar" class="hidden mt-5 pt-4 border-t" style="border-color:var(--borde)">
+              <div class="flex items-center gap-3">
+                <span class="w-9 h-9 rounded-xl bg-rose-500/15 text-rose-500 grid place-items-center shrink-0"><i data-lucide="archive" class="w-4 h-4"></i></span>
+                <div class="flex-1 min-w-0">
+                  <p class="font-bold text-sm">Vaciar base actual</p>
+                  <p class="text-[11px] tenue">Se archiva en el Historial (no se pierde) y la agenda queda limpia para la nueva. <span id="hr-vaciar-info" class="num font-bold"></span></p>
+                </div>
+                <button id="hr-vaciar-btn" class="btn btn-fantasma !py-2 !px-3 text-xs text-rose-500 shrink-0"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Vaciar</button>
+              </div>
+              <div id="hr-vaciar-confirmar" class="hidden mt-3 rounded-2xl p-3 border border-rose-500/30 bg-rose-500/10">
+                <p id="hr-vaciar-texto" class="text-xs font-semibold text-rose-500"></p>
+                <div class="flex gap-2 mt-3">
+                  <button id="hr-vaciar-no" class="btn btn-fantasma !py-2 text-xs flex-1">Cancelar</button>
+                  <button id="hr-vaciar-si" class="btn btn-peligro !py-2 text-xs flex-[2]"><i data-lucide="archive" class="w-3.5 h-3.5"></i> Sí, archivar y vaciar</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1007,6 +1026,8 @@
       const btn = $('#btn-herramientas');
       $('#hr-carga').classList.toggle('hidden', !ahora.carga);
       $('#hr-reporte').classList.toggle('hidden', !ahora.reporte);
+      $('#hr-vaciar').classList.toggle('hidden', !(ahora.carga && ahora.reporte));
+      if (!(ahora.carga && ahora.reporte)) $('#hr-vaciar-confirmar').classList.add('hidden');
       if (!ahora.carga) limpiarCarga();
 
       if (alguno && !habiaAlguno) {
@@ -1041,6 +1062,8 @@
         $('#hr-desde').value = iso; $('#hr-hasta').value = iso;
       }
       if (S.permisos.carga) asegurarLectorExcel().catch(() => {}); // se precarga mientras el técnico elige el archivo
+      $('#hr-vaciar-confirmar').classList.add('hidden');
+      $('#hr-vaciar-info').textContent = S.agenda.length ? `Hoy hay ${S.agenda.length} citas cargadas.` : 'La agenda ya está vacía.';
       $('#modal-herr').classList.add('abierto');
       gsap.fromTo('#caja-herr', { y: 40, scale: .96, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: .55, ease: 'expo.out' });
       gsap.fromTo('#caja-herr .herr-card:not(.hidden)', { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: .5, stagger: .08, delay: .1, ease: 'power3.out', clearProps: 'transform,opacity' });
@@ -1124,6 +1147,43 @@
       } catch (err) {
         if (SESION.token && !String(err && err.message).includes('SIN_PERMISO')) toast('No se pudo cargar la base. Intenta de nuevo.', 'error');
         if (String(err && err.message).includes('SIN_PERMISO')) refrescarPermisos();
+      } finally { btn.disabled = false; btn.innerHTML = html; }
+    });
+
+    /* Vaciar base (archiva en el Historial, igual que el cierre de turno del supervisor) */
+    $('#hr-vaciar-btn').addEventListener('click', () => {
+      const todas = citas();
+      if (!todas.length) return toast('La agenda ya está vacía: puedes cargar la nueva base.', 'info');
+      const pend = todas.filter(esPendiente).length;
+      $('#hr-vaciar-texto').textContent = `Se archivarán ${todas.length} citas en el Historial y se limpiarán las pantallas de todos los técnicos.`
+        + (pend ? ` Quedan ${pend} sin registrar. ¿Ya descargaste el reporte?` : ' ¿Ya descargaste el reporte?');
+      const caja = $('#hr-vaciar-confirmar');
+      caja.classList.remove('hidden');
+      gsap.fromTo(caja, { opacity: 0, y: -8, height: 0 }, { opacity: 1, y: 0, height: 'auto', duration: .4, ease: 'power3.out', clearProps: 'height' });
+    });
+    $('#hr-vaciar-no').addEventListener('click', () => {
+      gsap.to('#hr-vaciar-confirmar', { opacity: 0, y: -6, duration: .2, onComplete: () => { $('#hr-vaciar-confirmar').classList.add('hidden'); gsap.set('#hr-vaciar-confirmar', { clearProps: 'all' }); } });
+    });
+    $('#hr-vaciar-si').addEventListener('click', async () => {
+      const btn = $('#hr-vaciar-si'), html = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = `${icono('refresh-cw', 'w-3.5 h-3.5 animate-spin')} Archivando…`;
+      try {
+        const r = await api('cerrarTurno');
+        if (!r.exito) return toast(r.mensaje, 'aviso');
+        S.cargaPropia = true;
+        setTimeout(() => { S.cargaPropia = false; }, 4000);
+        await db.ref('pacientes_hoy').remove().catch(() => {});
+        await db.ref('logs').remove().catch(() => {});
+        await avisarCambio('recargar'); // los demás iPads y el supervisor quedan vacíos
+        S.agenda = []; S.vivo = {};
+        render();
+        $('#hr-vaciar-confirmar').classList.add('hidden');
+        $('#hr-vaciar-info').textContent = 'La agenda ya está vacía.';
+        toast(r.mensaje + ' Ya puedes cargar la nueva base.', 'ok', { duracion: 8000 });
+        gsap.fromTo(zonaHr, { scale: .97 }, { scale: 1, duration: .6, ease: 'elastic.out(1, .5)' });
+      } catch (err) {
+        if (String(err && err.message).includes('SIN_PERMISO')) refrescarPermisos();
+        else if (SESION.token) toast('No se pudo vaciar la base.', 'error');
       } finally { btn.disabled = false; btn.innerHTML = html; }
     });
 

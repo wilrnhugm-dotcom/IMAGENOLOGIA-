@@ -302,9 +302,13 @@ function buscarFila_(hoja, id) {
 //  CIERRE DE TURNO
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Mueve toda la agenda al "Historial" (con la fecha de cierre) y la limpia. */
+/**
+ * Mueve toda la agenda al "Historial" (con la fecha de cierre) y la limpia.
+ * Lo hace el supervisor, o un técnico que tenga encendidos LOS DOS switches
+ * (Descargar reporte + Cargar base), para vaciar la base y subir la nueva.
+ */
 function cerrarTurno(token) {
-  sesion_(token, ROLES.SUPERVISOR);
+  exigirPermiso_(token, ['carga', 'reporte']);
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -571,7 +575,8 @@ function exigirPermiso_(token, permiso) {
   var s = sesion_(token);
   if (s.rol === ROLES.SUPERVISOR) return s;
   var p = codigosActivos_()[s.codigo];
-  if (!p || !p[permiso]) throw new Error('SIN_PERMISO');
+  var todos = [].concat(permiso).every(function (k) { return p && p[k]; }); // uno o varios permisos
+  if (!todos) throw new Error('SIN_PERMISO');
   return s;
 }
 
