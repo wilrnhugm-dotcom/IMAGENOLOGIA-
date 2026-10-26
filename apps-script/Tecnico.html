@@ -29,6 +29,15 @@
     .area-btn.activo { color: #fff; box-shadow: 0 10px 24px -12px rgba(0, 0, 0, .6); }
     .area-btn .cuenta { font-family: 'JetBrains Mono', monospace; font-size: .72rem; padding: .05rem .45rem; border-radius: 999px; background: rgba(0, 178, 227, .15); }
     .area-btn.activo .cuenta { background: rgba(255, 255, 255, .25); }
+
+    /* ── Herramientas (permisos que habilita el supervisor) ── */
+    .zona-carga { border: 2px dashed rgba(0, 178, 227, .35); border-radius: 1.25rem; transition: border-color .25s ease, background-color .25s ease, transform .25s ease; }
+    .zona-carga.encima { border-color: #00B2E3; background: rgba(0, 178, 227, .08); transform: scale(1.01); }
+    .herr-card { position: relative; overflow: hidden; border: 1px solid var(--borde); border-radius: 1.4rem; padding: 1.25rem; background: rgba(255, 255, 255, .45); }
+    .dark .herr-card { background: rgba(5, 14, 26, .35); }
+    .herr-card .halo { position: absolute; width: 180px; height: 180px; border-radius: 50%; right: -60px; top: -70px; opacity: .22; pointer-events: none; }
+    #btn-herramientas .punto { position: absolute; top: -2px; right: -2px; width: .7rem; height: .7rem; border-radius: 999px; background: #00B2E3; box-shadow: 0 0 0 2px var(--fondo); }
+    #btn-herramientas .punto::after { content: ''; position: absolute; inset: -4px; border-radius: 999px; border: 2px solid #00B2E3; animation: pulsoVivo 1.8s ease-out infinite; }
   </style>
 </head>
 <body class="min-h-screen overflow-x-hidden">
@@ -100,6 +109,10 @@
             <span id="punto-conexion" class="punto-vivo"></span>
             <span id="reloj" class="num text-xs font-bold"></span>
           </div>
+          <button id="btn-herramientas" class="btn btn-fantasma !p-2.5 !rounded-full relative hidden" title="Herramientas: cargar base / descargar reporte">
+            <i data-lucide="folder-cog" class="w-5 h-5"></i>
+            <span class="punto hidden"></span>
+          </button>
           <button id="btn-mis" class="btn btn-fantasma !p-2.5 !rounded-full relative" title="Mis registros">
             <i data-lucide="history" class="w-5 h-5"></i>
             <span id="mis-cuenta" class="absolute -top-1 -right-1 min-w-[1.2rem] h-[1.2rem] px-1 rounded-full bg-cyan-500 text-white text-[10px] font-bold grid place-items-center hidden">0</span>
@@ -212,6 +225,75 @@
     </div>
   </div>
 
+  <!-- ═══════════════ HERRAMIENTAS (según permisos del supervisor) ═══════════════ -->
+  <div id="modal-herr" class="capa-modal">
+    <div id="caja-herr" class="vidrio borde-brillo rounded-[1.75rem] w-full max-w-xl max-h-[92vh] overflow-y-auto">
+      <div class="p-6 pb-4 flex items-center gap-3">
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-400 to-rosales-700 text-white grid place-items-center shadow-lg shadow-cyan-500/30 shrink-0"><i data-lucide="folder-cog" class="w-6 h-6"></i></div>
+        <div class="min-w-0">
+          <h3 class="font-display font-black text-lg leading-tight">Herramientas del <span class="texto-gradiente">turno</span></h3>
+          <p class="text-xs tenue">Permisos que te habilitó tu supervisor.</p>
+        </div>
+        <button id="herr-cerrar" class="ml-auto btn btn-fantasma !p-2 !rounded-full"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+
+      <div class="px-6 pb-6 space-y-4">
+        <!-- Cargar nueva base -->
+        <div id="hr-carga" class="herr-card hidden">
+          <div class="halo" style="background:radial-gradient(circle,#00B2E3,transparent 70%)"></div>
+          <div class="relative">
+            <div class="flex items-center gap-3">
+              <span class="w-10 h-10 rounded-xl bg-cyan-500/15 text-cyan-500 grid place-items-center shrink-0"><i data-lucide="cloud-upload" class="w-5 h-5"></i></span>
+              <div><h4 class="font-display font-extrabold">Cargar nueva base</h4><p class="text-xs tenue">Excel descargado de la plataforma del hospital. Las citas repetidas se omiten solas.</p></div>
+            </div>
+
+            <label id="hr-zona" class="zona-carga flex flex-col items-center justify-center text-center p-7 mt-4 cursor-pointer">
+              <input id="hr-archivo" type="file" accept=".xlsx,.xls,.csv" class="hidden">
+              <span id="hr-icono" class="w-12 h-12 rounded-2xl bg-cyan-500/15 text-cyan-500 grid place-items-center"><i data-lucide="file-spreadsheet" class="w-6 h-6"></i></span>
+              <p class="font-bold text-sm mt-3">Toca para elegir el archivo <span class="text-cyan-500">.xlsx</span></p>
+              <p class="text-[11px] tenue mt-0.5">o arrástralo aquí</p>
+            </label>
+
+            <div id="hr-vp" class="hidden mt-4">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="insignia bg-cyan-500/15 text-cyan-500 max-w-full"><i data-lucide="file-spreadsheet" class="w-3.5 h-3.5 shrink-0"></i> <span id="hr-vp-archivo" class="truncate"></span></span>
+                <span class="insignia bg-emerald-500/15 text-emerald-500"><span id="hr-vp-total" class="num"></span> pacientes</span>
+              </div>
+              <div id="hr-vp-mods" class="flex flex-wrap gap-1.5 mt-2"></div>
+              <div class="mt-3 rounded-2xl border overflow-hidden" style="border-color:var(--borde)">
+                <div id="hr-vp-lista" class="divide-y text-xs" style="--tw-divide-opacity:1;border-color:var(--borde)"></div>
+              </div>
+              <div class="flex gap-2 mt-4">
+                <button id="hr-cancelar" class="btn btn-fantasma">Cancelar</button>
+                <button id="hr-cargar" class="btn btn-primario flex-1 !py-3"><i data-lucide="cloud-upload" class="w-5 h-5"></i> Cargar <span id="hr-n" class="num"></span> pacientes</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Descargar reporte -->
+        <div id="hr-reporte" class="herr-card hidden">
+          <div class="halo" style="background:radial-gradient(circle,#10B981,transparent 70%)"></div>
+          <div class="relative">
+            <div class="flex items-center gap-3">
+              <span class="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-500 grid place-items-center shrink-0"><i data-lucide="file-down" class="w-5 h-5"></i></span>
+              <div><h4 class="font-display font-extrabold">Descargar reporte</h4><p class="text-xs tenue">Excel con resumen, asistieron, no asistieron (con motivos) y pendientes.</p></div>
+            </div>
+            <div class="grid grid-cols-2 gap-3 mt-4">
+              <label class="col-span-2 sm:col-span-1"><span class="text-[11px] font-black uppercase tracking-widest tenue">Origen</span>
+                <select id="hr-origen" class="campo mt-1 !py-2.5 text-sm font-semibold"><option value="actual">Turno actual</option><option value="historial">Historial (por fechas)</option></select></label>
+              <label class="col-span-2 sm:col-span-1"><span class="text-[11px] font-black uppercase tracking-widest tenue">Modalidad</span>
+                <select id="hr-modalidad" class="campo mt-1 !py-2.5 text-sm font-semibold"></select></label>
+              <label class="hr-fechas hidden"><span class="text-[11px] font-black uppercase tracking-widest tenue">Desde</span><input id="hr-desde" type="date" class="campo mt-1 !py-2.5 text-sm"></label>
+              <label class="hr-fechas hidden"><span class="text-[11px] font-black uppercase tracking-widest tenue">Hasta</span><input id="hr-hasta" type="date" class="campo mt-1 !py-2.5 text-sm"></label>
+            </div>
+            <button id="hr-descargar" class="btn btn-exito w-full mt-4 !py-3"><i data-lucide="file-spreadsheet" class="w-5 h-5"></i> Descargar Excel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══════════════ CAJÓN: MIS REGISTROS ═══════════════ -->
   <div id="velo-cajon" class="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm hidden"></div>
   <aside id="cajon" class="fixed top-0 right-0 bottom-0 z-50 w-full max-w-md vidrio !rounded-none flex flex-col">
@@ -254,7 +336,10 @@
       citaAusencia: null,
       motivo: null,
       listo: false,
-      limite: 30          // tarjetas dibujadas (crece al bajar)
+      limite: 30,         // tarjetas dibujadas (crece al bajar)
+      permisos: { reporte: false, carga: false }, // switches que enciende el supervisor
+      carga: null,        // Excel leído, en vista previa
+      cargaPropia: false  // esta pantalla subió la base: no repetir el aviso de "agenda actualizada"
     };
     const grid = $('#grid');
 
@@ -363,7 +448,8 @@
       btn.disabled = false; btn.innerHTML = html;
       if (!r.exito) return errorLogin(r.mensaje);
       $('#input-codigo').value = '';
-      Object.assign(SESION, { token: r.token, nombre: r.nombre, rol: r.rol });
+      Object.assign(SESION, { token: r.token, nombre: r.nombre, rol: r.rol, codigo: r.codigo });
+      aplicarPermisos(r.permisos || {}, false);
       iniciarTurno();
     }
 
@@ -406,7 +492,11 @@
       if (S.clave) db.ref('conexiones/' + S.clave).remove();
       db.ref('pacientes_hoy').off();
       db.ref('sistema/recargar').off();
-      Object.assign(SESION, { token: null, nombre: '', rol: '' });
+      db.ref('sistema/permisos').off();
+      if ($('#modal-herr').classList.contains('abierto')) cerrarHerramientas();
+      limpiarCarga();
+      aplicarPermisos({}, false);
+      Object.assign(SESION, { token: null, nombre: '', rol: '', codigo: '' });
       Object.assign(S, { listo: false, agenda: [], vivo: {}, nombre: '', clave: '', texto: '' });
       if ($('#modal-ausencia').classList.contains('abierto')) cerrarAusencia(false);
       cerrarCajon();
@@ -460,12 +550,19 @@
         render();
       });
       db.ref('sistema/recargar').on('value', (s) => {
+        if (S.cargaPropia) { S.cargaPropia = false; S.inicio = Date.now(); return; } // la subí yo: ya se está recargando
         if (s.val() && s.val() > S.inicio) {
           S.inicio = Date.now();
-          toast('El supervisor actualizó la agenda. Sincronizando…', 'info');
+          toast('Se actualizó la agenda. Sincronizando…', 'info');
           mostrarCargando();
           cargarAgenda();
         }
+      });
+      // El supervisor movió un switch: se consultan los permisos a la hoja (el primer aviso es el valor viejo).
+      let primerAviso = true;
+      db.ref('sistema/permisos').on('value', () => {
+        if (primerAviso) { primerAviso = false; return; }
+        refrescarPermisos();
       });
     }
 
@@ -479,7 +576,7 @@
     $('#orden').addEventListener('change', (e) => { S.orden = e.target.value; S.limite = PAGINA; render(); });
     document.addEventListener('keydown', (e) => {
       if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') { e.preventDefault(); $('#buscador').focus(); }
-      if (e.key === 'Escape') { if ($('#modal-ausencia').classList.contains('abierto')) cerrarAusencia(); cerrarCajon(); }
+      if (e.key === 'Escape') { if ($('#modal-ausencia').classList.contains('abierto')) cerrarAusencia(); if ($('#modal-herr').classList.contains('abierto')) cerrarHerramientas(); cerrarCajon(); }
     });
     $('#chips').addEventListener('click', (e) => {
       const b = e.target.closest('[data-sala]'); if (!b) return;
@@ -898,6 +995,170 @@
     }
     $('#cajon-cerrar').addEventListener('click', cerrarCajon);
     $('#velo-cajon').addEventListener('click', cerrarCajon);
+
+    /* ── Herramientas: permisos que el supervisor habilita con un switch ──
+       El servidor vuelve a revisar el permiso en cada acción; esto solo muestra u oculta. */
+    const TEXTO_PERMISO = { carga: 'Cargar nueva base', reporte: 'Descargar reporte' };
+
+    function aplicarPermisos(p, avisar) {
+      const antes = S.permisos, ahora = { reporte: !!p.reporte, carga: !!p.carga };
+      S.permisos = ahora;
+      const alguno = ahora.reporte || ahora.carga, habiaAlguno = antes.reporte || antes.carga;
+      const btn = $('#btn-herramientas');
+      $('#hr-carga').classList.toggle('hidden', !ahora.carga);
+      $('#hr-reporte').classList.toggle('hidden', !ahora.reporte);
+      if (!ahora.carga) limpiarCarga();
+
+      if (alguno && !habiaAlguno) {
+        btn.classList.remove('hidden');
+        gsap.fromTo(btn, { scale: 0, rotate: -90 }, { scale: 1, rotate: 0, duration: .7, ease: 'back.out(2.2)', clearProps: 'transform' });
+      } else if (!alguno && habiaAlguno) {
+        gsap.to(btn, { scale: 0, duration: .3, ease: 'power2.in', onComplete: () => { btn.classList.add('hidden'); gsap.set(btn, { clearProps: 'transform' }); } });
+        if ($('#modal-herr').classList.contains('abierto')) cerrarHerramientas();
+      }
+      if (!avisar) return;
+
+      const nuevos = Object.keys(ahora).filter(k => ahora[k] && !antes[k]);
+      const quitados = Object.keys(ahora).filter(k => !ahora[k] && antes[k]);
+      if (nuevos.length) {
+        btn.querySelector('.punto').classList.remove('hidden');
+        toast(`Tu supervisor te habilitó: ${nuevos.map(k => TEXTO_PERMISO[k]).join(' y ')}`, 'info', { duracion: 7000, accion: 'Abrir', alAccionar: abrirHerramientas });
+      }
+      if (quitados.length) toast(`Se retiró el permiso: ${quitados.map(k => TEXTO_PERMISO[k]).join(' y ')}`, 'aviso', { duracion: 6000 });
+    }
+
+    async function refrescarPermisos() {
+      if (!SESION.token) return;
+      try { aplicarPermisos(await api('misPermisos'), true); } catch (err) { /* sin conexión: se reintenta en el próximo aviso */ }
+    }
+
+    function abrirHerramientas() {
+      if (!S.permisos.carga && !S.permisos.reporte) return;
+      $('#btn-herramientas .punto').classList.add('hidden');
+      if (!$('#hr-modalidad').options.length) {
+        $('#hr-modalidad').innerHTML = '<option value="">Todas</option>' + Object.keys(MODALIDADES).map(m => `<option>${esc(m)}</option>`).join('');
+        const hoy = new Date(), iso = new Date(hoy.getTime() - hoy.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+        $('#hr-desde').value = iso; $('#hr-hasta').value = iso;
+      }
+      if (S.permisos.carga) asegurarLectorExcel().catch(() => {}); // se precarga mientras el técnico elige el archivo
+      $('#modal-herr').classList.add('abierto');
+      gsap.fromTo('#caja-herr', { y: 40, scale: .96, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: .55, ease: 'expo.out' });
+      gsap.fromTo('#caja-herr .herr-card:not(.hidden)', { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: .5, stagger: .08, delay: .1, ease: 'power3.out', clearProps: 'transform,opacity' });
+    }
+    function cerrarHerramientas() {
+      gsap.to('#caja-herr', { y: 20, scale: .97, opacity: 0, duration: .22, ease: 'power2.in', onComplete: () => $('#modal-herr').classList.remove('abierto') });
+    }
+    $('#btn-herramientas').addEventListener('click', abrirHerramientas);
+    $('#herr-cerrar').addEventListener('click', cerrarHerramientas);
+    $('#modal-herr').addEventListener('click', (e) => { if (e.target.id === 'modal-herr') cerrarHerramientas(); });
+
+    /* Cargar nueva base */
+    const zonaHr = $('#hr-zona');
+    ['dragenter', 'dragover'].forEach(ev => zonaHr.addEventListener(ev, e => { e.preventDefault(); zonaHr.classList.add('encima'); }));
+    ['dragleave', 'drop'].forEach(ev => zonaHr.addEventListener(ev, e => { e.preventDefault(); zonaHr.classList.remove('encima'); }));
+    zonaHr.addEventListener('drop', e => { if (e.dataTransfer.files[0]) leerBase(e.dataTransfer.files[0]); });
+    $('#hr-archivo').addEventListener('change', e => { if (e.target.files[0]) leerBase(e.target.files[0]); });
+
+    async function leerBase(archivo) {
+      const giro = gsap.to('#hr-icono', { rotation: '+=360', duration: .9, ease: 'power2.inOut', repeat: -1 });
+      try {
+        S.carga = await leerArchivoExcel(archivo);
+        mostrarBase();
+      } catch (err) {
+        toast(String(err && err.message) === 'LECTOR_EXCEL' ? 'No se pudo descargar el lector de Excel. Revisa la conexión e intenta de nuevo.' : 'No se pudo leer el archivo. ¿Es un Excel válido?', 'error', { duracion: 8000 });
+      } finally {
+        giro.kill(); gsap.to('#hr-icono', { rotation: 0, duration: .4, ease: 'power2.out' });
+        $('#hr-archivo').value = '';
+      }
+    }
+
+    function mostrarBase() {
+      const pacientes = pacientesDeCarga(S.carga);
+      if (!pacientes.length) {
+        S.carga = null;
+        return toast('No se encontraron pacientes en el archivo. Si el formato cambió, pídele al supervisor que lo cargue desde su panel.', 'aviso', { duracion: 9000 });
+      }
+      $('#hr-vp-archivo').textContent = S.carga.nombre;
+      $('#hr-vp-total').textContent = pacientes.length;
+      $('#hr-n').textContent = pacientes.length;
+      const cuenta = {}; pacientes.forEach(p => { cuenta[p.modalidad] = (cuenta[p.modalidad] || 0) + 1; });
+      $('#hr-vp-mods').innerHTML = Object.keys(cuenta).sort().map(m => { const md = modalidad(m); return `<span class="insignia" style="background:${md.color}22;color:${md.color}">${icono(md.icono, 'w-3 h-3')} ${esc(m)} <b class="num">${cuenta[m]}</b></span>`; }).join('');
+      $('#hr-vp-lista').innerHTML = pacientes.slice(0, 5).map(p => `<div class="flex items-center gap-3 px-3 py-2 border-t first:border-t-0" style="border-color:var(--borde)"><span class="num text-cyan-500 font-bold shrink-0">${esc(p.expediente)}</span><span class="font-bold uppercase truncate flex-1">${esc(p.paciente)}</span><span class="num tenue shrink-0">${esc(p.hora)}</span></div>`).join('')
+        + (pacientes.length > 5 ? `<div class="px-3 py-2 text-center tenue border-t" style="border-color:var(--borde)">… y ${pacientes.length - 5} más</div>` : '');
+      refrescarIconos();
+      gsap.to(zonaHr, { height: 0, paddingTop: 0, paddingBottom: 0, marginTop: 0, opacity: 0, duration: .35, ease: 'power2.inOut', onComplete: () => zonaHr.classList.add('hidden') });
+      $('#hr-vp').classList.remove('hidden');
+      gsap.fromTo('#hr-vp', { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: .45, delay: .15, ease: 'power3.out' });
+    }
+
+    function limpiarCarga() {
+      S.carga = null;
+      $('#hr-vp').classList.add('hidden');
+      zonaHr.classList.remove('hidden');
+      gsap.set(zonaHr, { clearProps: 'all' });
+    }
+    $('#hr-cancelar').addEventListener('click', () => {
+      gsap.to('#hr-vp', { opacity: 0, y: 8, duration: .2, onComplete: () => {
+        limpiarCarga();
+        gsap.fromTo(zonaHr, { opacity: 0, y: -8 }, { opacity: 1, y: 0, duration: .35, ease: 'power3.out', clearProps: 'all' });
+      } });
+    });
+
+    $('#hr-cargar').addEventListener('click', async () => {
+      if (!S.carga) return;
+      const pacientes = pacientesDeCarga(S.carga);
+      const btn = $('#hr-cargar'), html = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = `${icono('refresh-cw', 'w-5 h-5 animate-spin')} Cargando ${pacientes.length} pacientes…`;
+      try {
+        const r = await api('registrarAgenda', pacientes);
+        if (!r.exito) return toast(r.mensaje, 'error', { duracion: 8000 });
+        const b = btn.getBoundingClientRect(); explosion(b.left + b.width / 2, b.top, '#00B2E3', 30);
+        toast(r.mensaje, 'ok', { duracion: 7000 });
+        limpiarCarga();
+        cerrarHerramientas();
+        S.cargaPropia = true;
+        setTimeout(() => { S.cargaPropia = false; }, 4000); // por si el aviso no llega a Firebase
+        await avisarCambio('recargar'); // los demás iPads y el supervisor se actualizan solos
+        mostrarCargando();
+        cargarAgenda();
+      } catch (err) {
+        if (SESION.token && !String(err && err.message).includes('SIN_PERMISO')) toast('No se pudo cargar la base. Intenta de nuevo.', 'error');
+        if (String(err && err.message).includes('SIN_PERMISO')) refrescarPermisos();
+      } finally { btn.disabled = false; btn.innerHTML = html; }
+    });
+
+    /* Descargar reporte */
+    $('#hr-origen').addEventListener('change', (e) => {
+      const fechas = $$('.hr-fechas'), ver = e.target.value === 'historial';
+      fechas.forEach(x => x.classList.toggle('hidden', !ver));
+      if (ver) gsap.fromTo(fechas, { opacity: 0, y: -6 }, { opacity: 1, y: 0, duration: .3, stagger: .05, clearProps: 'all' });
+    });
+
+    $('#hr-descargar').addEventListener('click', async () => {
+      const origen = $('#hr-origen').value, mod = $('#hr-modalidad').value;
+      const desde = $('#hr-desde').value, hasta = $('#hr-hasta').value;
+      if (origen === 'historial' && (!desde || !hasta || desde > hasta)) return toast('Revisa el rango de fechas.', 'aviso');
+      const btn = $('#hr-descargar'), html = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = `${icono('refresh-cw', 'w-5 h-5 animate-spin')} Creando Excel…`;
+      try {
+        let filas = origen === 'actual' ? citas() : await api('obtenerDatosReporte', { origen, desde, hasta });
+        const registrada = (c) => c.estado === ESTADO.ASISTIO || c.estado === ESTADO.AUSENTE;
+        filas = filas.map(c => ({ ...c, estado: registrada(c) ? c.estado : ESTADO.PENDIENTE, registrado: c.ts && origen === 'actual' ? new Date(c.ts).toLocaleString('es-SV') : c.registrado }));
+        if (mod) filas = filas.filter(c => c.modalidad === mod);
+        if (!filas.length) return toast('No hay citas para ese filtro.', 'aviso');
+        const titulo = (origen === 'actual'
+          ? 'Turno actual · ' + new Date().toLocaleDateString('es-SV', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+          : `Historial del ${desde.split('-').reverse().join('/')} al ${hasta.split('-').reverse().join('/')}`) + (mod ? ' · ' + mod : '');
+        const r = await api('generarReporteExcel', filas, { titulo });
+        if (!r.exito) return toast(r.mensaje, 'aviso');
+        descargarBase64(r.base64, r.nombreArchivo, TIPO_XLSX);
+        const b = btn.getBoundingClientRect(); explosion(b.left + b.width / 2, b.top, '#10B981', 24);
+        toast('Reporte descargado: ' + r.nombreArchivo, 'ok', { duracion: 6000 });
+      } catch (err) {
+        if (String(err && err.message).includes('SIN_PERMISO')) refrescarPermisos();
+        else if (SESION.token) toast('No se pudo crear el reporte.', 'error');
+      } finally { btn.disabled = false; btn.innerHTML = html; }
+    });
 
     // Refrescar indicadores de "atrasada / ahora" cada minuto.
     setInterval(() => S.listo && render(), 60000);

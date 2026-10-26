@@ -13,7 +13,8 @@
  *  La hoja "Asistencia_Diaria" contiene la agenda del turno actual.
  *  La hoja "Historial" acumula todos los turnos cerrados (una fila por cita),
  *  lo que permite sacar reportes por rango de fechas.
- *  La hoja "Accesos" guarda los códigos que el supervisor asigna a cada técnico.
+ *  La hoja "Accesos" guarda los códigos que el supervisor asigna a cada técnico
+ *  y sus permisos extra (switches): "Descarga reporte" y "Carga base".
  * ============================================================================
  */
 
@@ -43,9 +44,16 @@ var C = {
 
 var ESTADOS = { PENDIENTE: 'Pendiente', ASISTIO: 'Asistió', AUSENTE: 'Ausente' };
 
-var ENCABEZADOS_ACCESOS = ['Código', 'Nombre', 'Rol', 'Activo', 'Creado', 'Creado por', 'Último acceso'];
-var A = { CODIGO: 0, NOMBRE: 1, ROL: 2, ACTIVO: 3, CREADO: 4, CREADO_POR: 5, ULTIMO: 6 };
+var ENCABEZADOS_ACCESOS = ['Código', 'Nombre', 'Rol', 'Activo', 'Creado', 'Creado por', 'Último acceso', 'Descarga reporte', 'Carga base'];
+var A = { CODIGO: 0, NOMBRE: 1, ROL: 2, ACTIVO: 3, CREADO: 4, CREADO_POR: 5, ULTIMO: 6, REPORTE: 7, CARGA: 8 };
 var ROLES = { TECNICO: 'Técnico', SUPERVISOR: 'Supervisor' };
+
+// Permisos extra que el supervisor puede encender (switch) a cada técnico.
+// Los supervisores los tienen siempre.
+var PERMISOS = {
+  reporte: { columna: A.REPORTE, nombre: 'Descargar reporte' },
+  carga:   { columna: A.CARGA,   nombre: 'Cargar nueva base' }
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ENTRADA WEB
@@ -92,8 +100,13 @@ function asegurarHojas_() {
   }
   if (!agenda) agenda = crearHoja_(ss, CONFIG.HOJA_AGENDA, ENCABEZADOS);
   if (!ss.getSheetByName(CONFIG.HOJA_HISTORIAL)) crearHoja_(ss, CONFIG.HOJA_HISTORIAL, ENCABEZADOS_HISTORIAL);
-  if (!ss.getSheetByName(CONFIG.HOJA_ACCESOS)) {
+  var accesos = ss.getSheetByName(CONFIG.HOJA_ACCESOS);
+  if (!accesos) {
     crearHoja_(ss, CONFIG.HOJA_ACCESOS, ENCABEZADOS_ACCESOS).getRange('A:A').setNumberFormat('@');
+  } else if (accesos.getLastColumn() < ENCABEZADOS_ACCESOS.length) {
+    // Hoja creada con la versión anterior: se agregan las columnas de permisos (no se borra nada).
+    accesos.getRange(1, 1, 1, ENCABEZADOS_ACCESOS.length).setValues([ENCABEZADOS_ACCESOS])
+      .setBackground('#10567F').setFontColor('#FFFFFF').setFontWeight('bold');
   }
   return agenda;
 }
@@ -124,7 +137,7 @@ function leerFilas_(hoja, columnas) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function registrarAgenda(token, filas) {
-  sesion_(token, ROLES.SUPERVISOR);
+  exigirPermiso_(token, 'carga'); // supervisores, o técnicos con el switch "Cargar nueva base"
   if (!filas || !filas.length) return { exito: false, mensaje: 'El archivo no tiene pacientes.' };
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
@@ -325,7 +338,7 @@ function cerrarTurno(token) {
  * filtros.desde / filtros.hasta: 'yyyy-MM-dd' (solo historial, por fecha de cierre)
  */
 function obtenerDatosReporte(token, filtros) {
-  sesion_(token, ROLES.SUPERVISOR);
+  exigirPermiso_(token, 'reporte'); // supervisores, o técnicos con el switch "Descargar reporte"
   filtros = filtros || {};
   if (filtros.origen !== 'historial') return agenda_();
   var hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.HOJA_HISTORIAL);
@@ -344,8 +357,10 @@ function obtenerDatosReporte(token, filtros) {
  * `filas` llega ya filtrado desde el navegador.
  */
 function generarReporteExcel(token, filas, info) {
-  sesion_(token, ROLES.SUPERVISOR);
+  var yo = exigirPermiso_(token, 'reporte');
   info = info || {};
+  // Si lo descarga un técnico, el nombre lo pone el servidor.
+  if (yo.rol !== ROLES.SUPERVISOR || !info.generadoPor) info.generadoPor = yo.nombre;
   if (!filas || !filas.length) return { exito: false, mensaje: 'No hay datos para el reporte.' };
 
   var asistio = filas.filter(function (p) { return p.estado === ESTADOS.ASISTIO; });
@@ -516,7 +531,48 @@ function iniciarSesion(codigo, rolRequerido) {
   var datos = JSON.stringify({ codigo: acceso.codigo, nombre: acceso.nombre, rol: acceso.rol });
   CacheService.getScriptCache().put('ses_' + token, datos, CONFIG.HORAS_SESION * 3600);
   try { hojaAccesos_().getRange(acceso.fila, A.ULTIMO + 1).setValue(fechaTexto_(new Date(), 'yyyy-MM-dd HH:mm')); } catch (e) {}
-  return { exito: true, token: token, nombre: acceso.nombre, rol: acceso.rol, codigo: acceso.codigo };
+  return { exito: true, token: token, nombre: acceso.nombre, rol: acceso.rol, codigo: acceso.codigo, permisos: permisosDe_(acceso) };
+}
+
+/** Permisos vigentes de quien llama (el técnico los consulta cuando el supervisor mueve un switch). */
+function misPermisos(token) {
+  var s = sesion_(token);
+  if (s.rol === ROLES.SUPERVISOR) return { reporte: true, carga: true };
+  var p = codigosActivos_()[s.codigo] || {};
+  return { reporte: !!p.reporte, carga: !!p.carga };
+}
+
+/** Switch del supervisor: enciende o apaga un permiso a un técnico. */
+function cambiarPermisoAcceso(token, codigo, permiso, valor) {
+  sesion_(token, ROLES.SUPERVISOR);
+  if (!PERMISOS[permiso]) return { exito: false, mensaje: 'Permiso desconocido.' };
+  var a = buscarAcceso_(codigo);
+  if (!a) return { exito: false, mensaje: 'El código no existe.' };
+  if (a.rol === ROLES.SUPERVISOR) return { exito: false, mensaje: 'Los supervisores ya tienen todos los permisos.' };
+  hojaAccesos_().getRange(a.fila, PERMISOS[permiso].columna + 1).setValue(valor ? 'Sí' : 'No');
+  CacheService.getScriptCache().remove(CLAVE_CACHE_ACCESOS);
+  return {
+    exito: true,
+    mensaje: PERMISOS[permiso].nombre + (valor ? ' activado para ' : ' desactivado para ') + a.nombre
+  };
+}
+
+function permisosDe_(a) {
+  if (a.rol === ROLES.SUPERVISOR) return { reporte: true, carga: true };
+  return { reporte: !!a.puedeReporte, carga: !!a.puedeCarga };
+}
+
+/**
+ * Como sesion_(), pero además exige un permiso. Los supervisores siempre pasan;
+ * a los técnicos se les revisa el switch en ese momento (si el supervisor lo
+ * apaga, la siguiente acción ya se rechaza).
+ */
+function exigirPermiso_(token, permiso) {
+  var s = sesion_(token);
+  if (s.rol === ROLES.SUPERVISOR) return s;
+  var p = codigosActivos_()[s.codigo];
+  if (!p || !p[permiso]) throw new Error('SIN_PERMISO');
+  return s;
 }
 
 function cerrarSesion(token) {
@@ -551,7 +607,7 @@ function cambiarEstadoAcceso(token, codigo, activo) {
   if (!activo && a.codigo === yo.codigo) return { exito: false, mensaje: 'No puedes desactivar tu propio código.' };
   if (!activo && esUltimoSupervisor_(a)) return { exito: false, mensaje: 'Debe quedar al menos un supervisor activo.' };
   hojaAccesos_().getRange(a.fila, A.ACTIVO + 1).setValue(activo ? 'Sí' : 'No');
-  CacheService.getScriptCache().remove('accesos_activos');
+  CacheService.getScriptCache().remove(CLAVE_CACHE_ACCESOS);
   return { exito: true, mensaje: (activo ? 'Activado: ' : 'Desactivado: ') + a.nombre };
 }
 
@@ -562,7 +618,7 @@ function eliminarAcceso(token, codigo) {
   if (a.codigo === yo.codigo) return { exito: false, mensaje: 'No puedes eliminar tu propio código.' };
   if (esUltimoSupervisor_(a)) return { exito: false, mensaje: 'Debe quedar al menos un supervisor activo.' };
   hojaAccesos_().deleteRow(a.fila);
-  CacheService.getScriptCache().remove('accesos_activos');
+  CacheService.getScriptCache().remove(CLAVE_CACHE_ACCESOS);
   return { exito: true, mensaje: 'Código eliminado: ' + a.nombre };
 }
 
@@ -581,14 +637,18 @@ function sesion_(token, rolRequerido) {
   return s;
 }
 
-/** Mapa de códigos activos, en caché 10 minutos (se borra al cambiar accesos). */
+/**
+ * Mapa de códigos activos con sus permisos: { CODIGO: {reporte, carga} }.
+ * En caché 10 minutos; se borra al cambiar un código o un switch.
+ */
+var CLAVE_CACHE_ACCESOS = 'accesos_activos_v2';
 function codigosActivos_() {
   var cache = CacheService.getScriptCache();
-  var guardado = cache.get('accesos_activos');
+  var guardado = cache.get(CLAVE_CACHE_ACCESOS);
   if (guardado) return JSON.parse(guardado);
   var mapa = {};
-  accesos_().forEach(function (a) { if (a.activo) mapa[a.codigo] = true; });
-  cache.put('accesos_activos', JSON.stringify(mapa), 600);
+  accesos_().forEach(function (a) { if (a.activo) mapa[a.codigo] = permisosDe_(a); });
+  cache.put(CLAVE_CACHE_ACCESOS, JSON.stringify(mapa), 600);
   return mapa;
 }
 
@@ -608,7 +668,9 @@ function accesos_() {
       activo: limpiar_(f[A.ACTIVO]).toLowerCase() !== 'no',
       creado: valorTexto_(f[A.CREADO], 'yyyy-MM-dd HH:mm'),
       creadoPor: limpiar_(f[A.CREADO_POR]),
-      ultimoAcceso: valorTexto_(f[A.ULTIMO], 'yyyy-MM-dd HH:mm')
+      ultimoAcceso: valorTexto_(f[A.ULTIMO], 'yyyy-MM-dd HH:mm'),
+      puedeReporte: esSi_(f[A.REPORTE]),
+      puedeCarga: esSi_(f[A.CARGA])
     };
   }).filter(function (a) { return a.codigo; });
 }
@@ -634,12 +696,15 @@ function agregarAcceso_(codigo, nombre, rol, creadoPor) {
   var hoja = hojaAccesos_();
   hoja.getRange(hoja.getLastRow() + 1, 1, 1, ENCABEZADOS_ACCESOS.length).setValues([[
     normalizarCodigo_(codigo), limpiar_(nombre).toUpperCase(), rol, 'Sí',
-    fechaTexto_(new Date(), 'yyyy-MM-dd HH:mm'), creadoPor || '', ''
+    fechaTexto_(new Date(), 'yyyy-MM-dd HH:mm'), creadoPor || '', '', 'No', 'No'
   ]]);
-  CacheService.getScriptCache().remove('accesos_activos');
+  CacheService.getScriptCache().remove(CLAVE_CACHE_ACCESOS);
 }
 
 function normalizarCodigo_(c) { return limpiar_(c).toUpperCase().replace(/\s+/g, ''); }
+
+/** "Sí", "si", "SI", true → true. Vacío o "No" → false (los permisos nacen apagados). */
+function esSi_(v) { return v === true || /^s[ií]$/i.test(limpiar_(v)); }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  UTILIDADES

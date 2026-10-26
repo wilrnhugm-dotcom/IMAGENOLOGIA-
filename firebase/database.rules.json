@@ -23,7 +23,8 @@
     },
     "sistema": {
       ".read": true,
-      "recargar": { ".write": true, ".validate": "newData.isNumber()" }
+      "recargar": { ".write": true, ".validate": "newData.isNumber()" },
+      "permisos": { ".write": true, ".validate": "newData.isNumber()" }
     }
   }
 }

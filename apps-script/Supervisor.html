@@ -5,7 +5,6 @@
   <title>Radar Imagenología · UGM</title>
   <?!= include('Cabecera') ?>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js" data-opcional></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" data-opcional></script>
   <?!= include('Estilos') ?>
   <style>
     .nav-item { display: flex; align-items: center; gap: .8rem; padding: .8rem 1rem; border-radius: 1rem; font-weight: 600; font-size: .9rem; color: var(--tenue); position: relative; transition: color .2s ease; width: 100%; }
@@ -29,6 +28,22 @@
     .pestana { padding: .55rem 1rem; border-radius: .8rem; font-weight: 700; font-size: .8rem; color: var(--tenue); }
     .pestana.activa { background: rgba(0, 178, 227, .14); color: #00B2E3; }
     .lienzo { position: relative; height: 280px; }
+
+    /* ── Switches de permisos (Accesos) ── */
+    .permiso { display: inline-flex; align-items: center; gap: .55rem; padding: .3rem .65rem .3rem .3rem; border-radius: 999px; border: 1px solid var(--borde); font-size: .74rem; font-weight: 700; color: var(--tenue); transition: color .3s ease, border-color .3s ease, background-color .3s ease; white-space: nowrap; }
+    .permiso:hover { border-color: rgba(0, 178, 227, .45); color: var(--texto); }
+    .permiso .interruptor { position: relative; width: 2.35rem; height: 1.35rem; border-radius: 999px; background: rgba(100, 116, 139, .28); transition: background-color .35s cubic-bezier(.4, 0, .2, 1), box-shadow .35s ease; flex-shrink: 0; }
+    .permiso .perilla { position: absolute; top: .175rem; left: .175rem; width: 1rem; height: 1rem; border-radius: 999px; background: #fff; box-shadow: 0 2px 6px rgba(3, 10, 20, .35); transition: transform .35s cubic-bezier(.34, 1.4, .64, 1); display: grid; place-items: center; color: #94A3B8; }
+    .permiso .perilla svg { width: .6rem; height: .6rem; transition: opacity .2s ease; }
+    .permiso .perilla .si { position: absolute; opacity: 0; color: #0891B2; }
+    .permiso[aria-checked="true"] { color: var(--texto); border-color: rgba(0, 178, 227, .4); background: rgba(0, 178, 227, .07); }
+    .permiso[aria-checked="true"] .interruptor { background: linear-gradient(135deg, #00B2E3, #10567F); box-shadow: 0 0 0 3px rgba(0, 178, 227, .14), 0 6px 14px -6px rgba(0, 178, 227, .9); }
+    .permiso[aria-checked="true"] .perilla { transform: translateX(1rem); }
+    .permiso[aria-checked="true"] .perilla .si { opacity: 1; }
+    .permiso[aria-checked="true"] .perilla .no { opacity: 0; }
+    .permiso[aria-busy="true"] { pointer-events: none; }
+    .permiso[aria-busy="true"] .perilla { animation: perillaEspera .9s ease-in-out infinite; }
+    @keyframes perillaEspera { 50% { box-shadow: 0 0 0 4px rgba(0, 178, 227, .35); } }
   </style>
 </head>
 <body class="min-h-screen overflow-x-hidden">
@@ -404,11 +419,11 @@
               </div>
               <div class="overflow-auto max-h-[calc(100vh-240px)]">
                 <table class="tabla w-full">
-                  <thead><tr><th>Nombre</th><th>Código</th><th>Tipo</th><th>Estado</th><th>Último ingreso</th><th></th></tr></thead>
+                  <thead><tr><th>Nombre</th><th>Código</th><th>Tipo</th><th>Permisos del técnico</th><th>Estado</th><th>Último ingreso</th><th></th></tr></thead>
                   <tbody id="ac-cuerpo"></tbody>
                 </table>
               </div>
-              <p class="p-3 text-xs tenue border-t" style="border-color:var(--borde)">Al desactivar o eliminar un código, esa persona sale del sistema en su próxima acción. Los códigos se guardan en la hoja privada <b>Accesos</b>.</p>
+              <p class="p-3 text-xs tenue border-t" style="border-color:var(--borde)">Con los <b>switches</b> le das a un técnico permiso de <b>descargar el reporte</b> o <b>cargar la nueva base</b> desde su iPad; el cambio le llega al instante y puedes quitarlo cuando quieras. Al desactivar o eliminar un código, esa persona sale del sistema en su próxima acción. Todo se guarda en la hoja privada <b>Accesos</b>.</p>
             </div>
           </div>
         </section>
@@ -593,6 +608,7 @@
         if (vista === 'panel') Object.values(G).forEach(g => g.resize());
         if (vista === 'agenda') pintarAgenda(citas(), true);
         if (vista === 'accesos') cargarAccesos();
+        if (vista === 'admin') asegurarLectorExcel().catch(() => {}); // se precarga para que el Excel abra al instante
       } });
       gsap.fromTo('#titulo-vista', { opacity: 0, x: -14 }, { opacity: 1, x: 0, duration: .4 });
       $('#titulo-vista').textContent = VISTAS[vista][0];
@@ -942,22 +958,11 @@
       try {
         const r = await api('generarReporteExcel', S.reporte.filas, { titulo: S.reporte.titulo, generadoPor: S.reporte.autor });
         if (!r.exito) return toast(r.mensaje, 'aviso');
-        descargarBase64(r.base64, r.nombreArchivo, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        descargarBase64(r.base64, r.nombreArchivo, TIPO_XLSX);
         toast('Excel descargado en tu PC: ' + r.nombreArchivo, 'ok', { duracion: 6000 });
       } catch (err) { toast('No se pudo crear el Excel.', 'error'); }
       finally { btn.disabled = false; btn.innerHTML = html; refrescarIconos(); }
     });
-
-    // Convierte el .xlsx que manda el servidor (base64) en una descarga directa.
-    function descargarBase64(base64, nombre, tipo) {
-      const bin = atob(base64), bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      const url = URL.createObjectURL(new Blob([bytes], { type: tipo }));
-      const a = document.createElement('a');
-      a.href = url; a.download = nombre;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
-    }
 
     $('#rp-csv').addEventListener('click', () => {
       if (!S.reporte) return;
@@ -1021,88 +1026,26 @@
     }
 
     /* ── Administración: carga del Excel ──────────────────────────────── */
-    const CAMPOS = [
-      ['expediente', 'Expediente', /expediente|^exp\b|n[°º.]?\s*exp|registro|historia cl/],
-      ['paciente', 'Paciente', /paciente|nombre/],
-      ['estudio', 'Estudio', /estudio|examen|procedimiento|prestaci|descripci/],
-      ['equipo', 'Equipo / sala', /equipo|modalidad|sala|recurso|agenda|maquina|m[aá]quina/],
-      ['ubicacion', 'Ubicación', /ubicaci|servicio|cama|procedencia|[aá]rea|origen/],
-      ['fecha', 'Fecha', /fecha/],
-      ['hora', 'Hora', /hora/],
-      ['medico', 'Médico', /m[eé]dico|solicitante|doctor|referente/]
-    ];
-    // Formato antiguo (sin encabezados reconocibles): columnas fijas desde la fila 6.
-    const MAPEO_ANTIGUO = { fila: 5, columnas: { expediente: 1, paciente: 2, ubicacion: 3, estudio: 4, hora: 6 } };
-
-    function normalizar(t) { return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(); }
-
-    function detectarModalidad(texto) {
-      const t = normalizar(texto).toUpperCase();
-      const reglas = [
-        ['RM', /RESONANCIA|\bRMN?\b|\bMRI\b|\bIRM\b/], ['TAC', /TOMOGRAF|\bTAC\b|\bTC\b|\bCT\b|ANGIOTAC|UROTAC/],
-        ['MAMOGRAFÍA', /MAMOGRAF|\bMAMO\b|TOMOSINTESIS/], ['DENSITOMETRÍA', /DENSITOMETR|\bDMO\b|\bDXA\b/],
-        ['FLUOROSCOPÍA', /FLUORO|ESOFAGOGRAMA|SERIE GASTRO|TRANSITO INTESTINAL|COLON POR ENEMA|UROGRAF|CISTOGRAF|HISTEROSALPING|FISTULOGRAF|DEFECOGRAF/],
-        ['INTERVENCIONISMO', /ANGIOGRAF|INTERVENC|EMBOLIZ|ARTERIOGRAF|FLEBOGRAF|BIOPSIA|DRENAJE/],
-        ['ULTRASONIDO', /ULTRASON|ULTRASONOGRAF|\bUSG?\b|ECOGRAF|\bECO\b|DOPPLER|SONOGRAF/],
-        ['RAYOS X', /RAYOS|\bRX\b|RADIOGRAF|PLACA|PORTATIL/]
-      ];
-      for (const [m, re] of reglas) if (re.test(t)) return m;
-      return 'OTROS';
-    }
-
+    // CAMPOS, detectarColumnas, pacientesDeCarga, detectarModalidad y leerArchivoExcel están en Comun.
     const zona = $('#zona-carga');
     ['dragenter', 'dragover'].forEach(ev => zona.addEventListener(ev, e => { e.preventDefault(); zona.classList.add('encima'); }));
     ['dragleave', 'drop'].forEach(ev => zona.addEventListener(ev, e => { e.preventDefault(); zona.classList.remove('encima'); }));
     zona.addEventListener('drop', e => { if (e.dataTransfer.files[0]) leerExcel(e.dataTransfer.files[0]); });
     $('#archivo').addEventListener('change', e => { if (e.target.files[0]) leerExcel(e.target.files[0]); });
 
-    function leerExcel(archivo) {
+    async function leerExcel(archivo) {
       gsap.to('#icono-carga', { rotation: 360, duration: .8, ease: 'power2.inOut' });
-      if (typeof XLSX === 'undefined') return toast('No se pudo cargar el lector de Excel. Recarga la página con Ctrl+F5.', 'error', { duracion: 9000 });
-      const lector = new FileReader();
-      lector.onload = (e) => {
-        try {
-          const libro = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
-          const hoja = libro.Sheets[libro.SheetNames[0]];
-          const filas = XLSX.utils.sheet_to_json(hoja, { header: 1, raw: false, defval: '', dateNF: 'dd/mm/yyyy hh:mm' });
-          S.carga = { nombre: archivo.name, filas, ...detectarColumnas(filas) };
-          mostrarVistaPrevia();
-        } catch (err) {
-          toast('No se pudo leer el archivo. ¿Es un Excel válido?', 'error');
-        }
-        $('#archivo').value = '';
-      };
-      lector.readAsArrayBuffer(archivo);
-    }
-
-    function detectarColumnas(filas) {
-      for (let i = 0; i < Math.min(filas.length, 25); i++) {
-        const celdas = filas[i].map(normalizar);
-        if (!celdas.some(c => CAMPOS[0][2].test(c))) continue;
-        const columnas = {}, usadas = new Set();
-        CAMPOS.forEach(([campo, , re]) => {
-          const j = celdas.findIndex((c, k) => c && !usadas.has(k) && re.test(c));
-          if (j >= 0) { columnas[campo] = j; usadas.add(j); }
-        });
-        if (columnas.expediente !== undefined && columnas.paciente !== undefined) return { encabezado: i, columnas };
+      try {
+        S.carga = await leerArchivoExcel(archivo);
+        mostrarVistaPrevia();
+      } catch (err) {
+        toast(String(err && err.message) === 'LECTOR_EXCEL' ? 'No se pudo cargar el lector de Excel. Recarga la página con Ctrl+F5.' : 'No se pudo leer el archivo. ¿Es un Excel válido?', 'error', { duracion: 8000 });
       }
-      return { encabezado: MAPEO_ANTIGUO.fila - 1, columnas: { ...MAPEO_ANTIGUO.columnas } };
-    }
-
-    function pacientesDeCarga() {
-      const { filas, encabezado, columnas } = S.carga;
-      const val = (f, campo) => columnas[campo] === undefined ? '' : String(f[columnas[campo]] ?? '').trim();
-      return filas.slice(encabezado + 1).map(f => {
-        const p = {}; CAMPOS.forEach(([campo]) => { p[campo] = val(f, campo); });
-        if (!p.hora) { const m = p.fecha.match(/\d{1,2}:\d{2}(\s?[ap]\.?\s?m\.?)?/i); if (m) p.hora = m[0]; }
-        if (p.fecha) p.fecha = p.fecha.replace(/\s+\d{1,2}:\d{2}.*$/, '');
-        p.modalidad = detectarModalidad(p.equipo + ' ' + p.estudio);
-        return p;
-      }).filter(p => p.expediente && p.paciente && !/expediente/i.test(p.expediente));
+      $('#archivo').value = '';
     }
 
     function mostrarVistaPrevia() {
-      const pacientes = pacientesDeCarga();
+      const pacientes = pacientesDeCarga(S.carga);
       $('#vista-previa').classList.remove('hidden');
       $('#vp-archivo').textContent = S.carga.nombre;
       $('#vp-total').textContent = pacientes.length;
@@ -1130,7 +1073,7 @@
     $('#vp-cancelar').addEventListener('click', () => { S.carga = null; gsap.to('#vista-previa', { opacity: 0, y: 10, duration: .25, onComplete: () => $('#vista-previa').classList.add('hidden') }); });
 
     $('#vp-cargar').addEventListener('click', async () => {
-      const pacientes = pacientesDeCarga(); if (!pacientes.length) return;
+      const pacientes = pacientesDeCarga(S.carga); if (!pacientes.length) return;
       const btn = $('#vp-cargar'), html = btn.innerHTML;
       btn.disabled = true; btn.innerHTML = `${icono('refresh-cw', 'w-5 h-5 animate-spin')} Cargando ${pacientes.length} pacientes…`; refrescarIconos();
       try {
@@ -1139,7 +1082,7 @@
         toast(r.mensaje, 'ok', { duracion: 7000 });
         const b = btn.getBoundingClientRect(); explosion(b.left + b.width / 2, b.top, '#00B2E3', 36);
         S.carga = null; $('#vista-previa').classList.add('hidden');
-        await db.ref('sistema/recargar').set(Date.now());
+        await avisarCambio('recargar');
       } catch (err) { toast('Error al cargar la agenda en la hoja.', 'error'); }
       finally { btn.disabled = false; btn.innerHTML = html; refrescarIconos(); }
     });
@@ -1204,19 +1147,52 @@
             <div class="min-w-0"><p class="font-bold uppercase truncate">${esc(a.nombre)}${yo ? ' <span class="insignia bg-cyan-500/15 text-cyan-500 ml-1">Tú</span>' : ''}</p><p class="text-[11px] tenue">Creado ${esc(a.creado)}${a.creadoPor ? ' · por ' + esc(a.creadoPor) : ''}</p></div></div></td>
           <td><button data-ver-codigo="${esc(a.codigo)}" class="num font-black tracking-[.25em] inline-flex items-center gap-2 hover:text-cyan-500" title="Mostrar u ocultar">${visible ? esc(a.codigo) : '••••••'} ${icono(visible ? 'eye-off' : 'eye', 'w-3.5 h-3.5 tenue')}</button></td>
           <td><span class="insignia ${sup ? 'bg-amber-500/15 text-amber-500' : 'bg-cyan-500/15 text-cyan-500'}">${icono(sup ? 'shield-check' : 'user-round', 'w-3 h-3')} ${esc(a.rol)}</span></td>
+          <td>${sup ? `<span class="insignia bg-amber-500/10 text-amber-500">${icono('shield-check', 'w-3 h-3')} Todos</span>`
+            : `<div class="flex flex-wrap gap-1.5">${htmlSwitch(a, 'reporte')}${htmlSwitch(a, 'carga')}</div>`}</td>
           <td>${a.activo ? `<span class="insignia bg-emerald-500/15 text-emerald-500">${icono('circle-check', 'w-3 h-3')} Activo</span>` : `<span class="insignia bg-rose-500/15 text-rose-500">${icono('ban', 'w-3 h-3')} Desactivado</span>`}</td>
           <td class="num text-xs tenue">${esc(a.ultimoAcceso || 'Nunca')}</td>
           <td class="whitespace-nowrap text-right">${yo ? '' : `
             <button data-estado-acceso="${esc(a.codigo)}" data-activo="${a.activo ? '0' : '1'}" class="btn btn-fantasma !py-1.5 !px-3 text-xs">${icono(a.activo ? 'ban' : 'circle-check', 'w-3.5 h-3.5')} ${a.activo ? 'Desactivar' : 'Activar'}</button>
             <button data-eliminar-acceso="${esc(a.codigo)}" class="btn btn-fantasma !py-1.5 !px-2.5 text-xs text-rose-500" title="Eliminar">${icono('trash-2', 'w-3.5 h-3.5')}</button>`}</td>
         </tr>`;
-      }).join('') : `<tr><td colspan="6" class="text-center py-14 tenue">${icono('key-round', 'w-10 h-10 mx-auto opacity-40')}<p class="mt-3">${accesos.length ? 'Ningún código coincide con la búsqueda.' : 'Aún no hay códigos. Asigna el primero a la izquierda.'}</p></td></tr>`;
+      }).join('') : `<tr><td colspan="7" class="text-center py-14 tenue">${icono('key-round', 'w-10 h-10 mx-auto opacity-40')}<p class="mt-3">${accesos.length ? 'Ningún código coincide con la búsqueda.' : 'Aún no hay códigos. Asigna el primero a la izquierda.'}</p></td></tr>`;
       if (animar) gsap.fromTo('#ac-cuerpo tr', { opacity: 0, x: -10 }, { opacity: 1, x: 0, duration: .3, stagger: .03, clearProps: 'opacity,transform' });
+    }
+
+    /* Switches de permisos: se mueven al instante y se confirman con el servidor;
+       si el servidor falla, el switch regresa solo. */
+    const PERMISOS_TEC = {
+      reporte: { campo: 'puedeReporte', texto: 'Descargar reporte', icono: 'file-down' },
+      carga:   { campo: 'puedeCarga',   texto: 'Cargar base',       icono: 'cloud-upload' }
+    };
+    function htmlSwitch(a, permiso) {
+      const p = PERMISOS_TEC[permiso], on = !!a[p.campo];
+      return `<button type="button" role="switch" aria-checked="${on}" data-permiso="${permiso}" data-codigo="${esc(a.codigo)}" class="permiso" title="${on ? 'Quitar' : 'Dar'} permiso: ${p.texto}">
+        <span class="interruptor"><span class="perilla">${icono('x', 'no')}${icono('check', 'si')}</span></span>${icono(p.icono, 'w-3.5 h-3.5')} ${p.texto}</button>`;
+    }
+    async function cambiarSwitch(btn) {
+      const a = accesos.find(x => x.codigo === btn.dataset.codigo); if (!a) return;
+      const p = PERMISOS_TEC[btn.dataset.permiso], nuevo = btn.getAttribute('aria-checked') !== 'true';
+      const poner = (v) => { a[p.campo] = v; btn.setAttribute('aria-checked', String(v)); btn.title = `${v ? 'Quitar' : 'Dar'} permiso: ${p.texto}`; };
+      poner(nuevo);
+      btn.setAttribute('aria-busy', 'true');
+      if (nuevo) { const r = btn.querySelector('.interruptor').getBoundingClientRect(); explosion(r.right - 8, r.top + r.height / 2, '#00B2E3', 10); }
+      try {
+        const r = await api('cambiarPermisoAcceso', a.codigo, btn.dataset.permiso, nuevo);
+        if (!r.exito) { poner(!nuevo); return toast(r.mensaje, 'aviso'); }
+        toast(r.mensaje, nuevo ? 'ok' : 'info');
+        avisarCambio('permisos'); // el iPad del técnico se actualiza solo
+      } catch (err) {
+        poner(!nuevo);
+        if (SESION.token) toast('No se pudo cambiar el permiso.', 'error');
+      } finally { btn.removeAttribute('aria-busy'); }
     }
 
     $('#ac-buscar').addEventListener('input', e => { textoAccesos = sinAcentos(e.target.value.trim()); pintarAccesos(); });
 
     $('#ac-cuerpo').addEventListener('click', e => {
+      const sw = e.target.closest('[data-permiso]');
+      if (sw) return cambiarSwitch(sw);
       const ver = e.target.closest('[data-ver-codigo]');
       if (ver) { const c = ver.dataset.verCodigo; verCodigo.has(c) ? verCodigo.delete(c) : verCodigo.add(c); return pintarAccesos(); }
       const est = e.target.closest('[data-estado-acceso]');

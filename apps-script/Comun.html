@@ -279,5 +279,107 @@
     db.ref('.info/connected').on('value', (s) => alCambiar(!!s.val()));
   }
 
+  /* ── Carga del Excel del hospital (compartido: supervisor y técnicos con permiso) ──
+     El archivo se lee en el navegador con SheetJS y al servidor solo llegan los pacientes. */
+  const CAMPOS = [
+    ['expediente', 'Expediente', /expediente|^exp\b|n[°º.]?\s*exp|registro|historia cl/],
+    ['paciente', 'Paciente', /paciente|nombre/],
+    ['estudio', 'Estudio', /estudio|examen|procedimiento|prestaci|descripci/],
+    ['equipo', 'Equipo / sala', /equipo|modalidad|sala|recurso|agenda|maquina|m[aá]quina/],
+    ['ubicacion', 'Ubicación', /ubicaci|servicio|cama|procedencia|[aá]rea|origen/],
+    ['fecha', 'Fecha', /fecha/],
+    ['hora', 'Hora', /hora/],
+    ['medico', 'Médico', /m[eé]dico|solicitante|doctor|referente/]
+  ];
+  // Formato antiguo (sin encabezados reconocibles): columnas fijas desde la fila 6.
+  const MAPEO_ANTIGUO = { fila: 5, columnas: { expediente: 1, paciente: 2, ubicacion: 3, estudio: 4, hora: 6 } };
+
+  function normalizar(t) { return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim(); }
+
+  function detectarModalidad(texto) {
+    const t = normalizar(texto).toUpperCase();
+    const reglas = [
+      ['RM', /RESONANCIA|\bRMN?\b|\bMRI\b|\bIRM\b/], ['TAC', /TOMOGRAF|\bTAC\b|\bTC\b|\bCT\b|ANGIOTAC|UROTAC/],
+      ['MAMOGRAFÍA', /MAMOGRAF|\bMAMO\b|TOMOSINTESIS/], ['DENSITOMETRÍA', /DENSITOMETR|\bDMO\b|\bDXA\b/],
+      ['FLUOROSCOPÍA', /FLUORO|ESOFAGOGRAMA|SERIE GASTRO|TRANSITO INTESTINAL|COLON POR ENEMA|UROGRAF|CISTOGRAF|HISTEROSALPING|FISTULOGRAF|DEFECOGRAF/],
+      ['INTERVENCIONISMO', /ANGIOGRAF|INTERVENC|EMBOLIZ|ARTERIOGRAF|FLEBOGRAF|BIOPSIA|DRENAJE/],
+      ['ULTRASONIDO', /ULTRASON|ULTRASONOGRAF|\bUSG?\b|ECOGRAF|\bECO\b|DOPPLER|SONOGRAF/],
+      ['RAYOS X', /RAYOS|\bRX\b|RADIOGRAF|PLACA|PORTATIL/]
+    ];
+    for (const [m, re] of reglas) if (re.test(t)) return m;
+    return 'OTROS';
+  }
+
+  /** El lector de Excel (~900 KB) solo se descarga cuando alguien lo necesita. */
+  let _lectorExcel = null;
+  function asegurarLectorExcel() {
+    if (typeof XLSX !== 'undefined') return Promise.resolve();
+    if (_lectorExcel) return _lectorExcel;
+    _lectorExcel = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      s.setAttribute('data-opcional', '');
+      s.onload = () => resolve();
+      s.onerror = () => { _lectorExcel = null; reject(new Error('LECTOR_EXCEL')); };
+      document.head.appendChild(s);
+    });
+    return _lectorExcel;
+  }
+
+  /** Lee el archivo y devuelve { nombre, filas, encabezado, columnas }. */
+  async function leerArchivoExcel(archivo) {
+    await asegurarLectorExcel();
+    const datos = await archivo.arrayBuffer();
+    const libro = XLSX.read(new Uint8Array(datos), { type: 'array', cellDates: true });
+    const hoja = libro.Sheets[libro.SheetNames[0]];
+    const filas = XLSX.utils.sheet_to_json(hoja, { header: 1, raw: false, defval: '', dateNF: 'dd/mm/yyyy hh:mm' });
+    return { nombre: archivo.name, filas, ...detectarColumnas(filas) };
+  }
+
+  function detectarColumnas(filas) {
+    for (let i = 0; i < Math.min(filas.length, 25); i++) {
+      const celdas = filas[i].map(normalizar);
+      if (!celdas.some(c => CAMPOS[0][2].test(c))) continue;
+      const columnas = {}, usadas = new Set();
+      CAMPOS.forEach(([campo, , re]) => {
+        const j = celdas.findIndex((c, k) => c && !usadas.has(k) && re.test(c));
+        if (j >= 0) { columnas[campo] = j; usadas.add(j); }
+      });
+      if (columnas.expediente !== undefined && columnas.paciente !== undefined) return { encabezado: i, columnas };
+    }
+    return { encabezado: MAPEO_ANTIGUO.fila - 1, columnas: { ...MAPEO_ANTIGUO.columnas } };
+  }
+
+  /** Pacientes listos para registrarAgenda() a partir de lo leído del Excel. */
+  function pacientesDeCarga(carga) {
+    const { filas, encabezado, columnas } = carga;
+    const val = (f, campo) => columnas[campo] === undefined ? '' : String(f[columnas[campo]] ?? '').trim();
+    return filas.slice(encabezado + 1).map(f => {
+      const p = {}; CAMPOS.forEach(([campo]) => { p[campo] = val(f, campo); });
+      if (!p.hora) { const m = p.fecha.match(/\d{1,2}:\d{2}(\s?[ap]\.?\s?m\.?)?/i); if (m) p.hora = m[0]; }
+      if (p.fecha) p.fecha = p.fecha.replace(/\s+\d{1,2}:\d{2}.*$/, '');
+      p.modalidad = detectarModalidad(p.equipo + ' ' + p.estudio);
+      return p;
+    }).filter(p => p.expediente && p.paciente && !/expediente/i.test(p.expediente));
+  }
+
+  /** Convierte el .xlsx que manda el servidor (base64) en una descarga directa a la PC/iPad. */
+  function descargarBase64(base64, nombre, tipo) {
+    const bin = atob(base64), bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: tipo }));
+    const a = document.createElement('a');
+    a.href = url; a.download = nombre;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+  const TIPO_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+  /** Avisa a todas las pantallas que cambió algo (agenda o permisos). */
+  function avisarCambio(nodo) {
+    const ts = Date.now();
+    return db.ref('sistema/' + nodo).set(ts).then(() => ts, () => ts);
+  }
+
   document.addEventListener('DOMContentLoaded', () => { refrescarIconos(); animarFondo(); });
 </script>

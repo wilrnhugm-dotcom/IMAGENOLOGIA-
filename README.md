@@ -59,6 +59,7 @@ El sistema original (Código.gs, Admin.html, Tecnico.html, Supervisor.html) func
 - ✅ **Carga del Excel con vista previa**: se detectan las columnas por su encabezado (con respaldo al formato antiguo), se pueden ajustar a mano y se **omiten los duplicados**.
 - ✅ **Historial único** (hoja "Historial") con la fecha de cierre, para sacar **reportes por rango de fechas**.
 - ✅ **Códigos de acceso**: los técnicos ya no escriben su nombre; entran con un **código que el supervisor les asigna** (sección *Accesos*). El panel de supervisores también pide código. El servidor valida el código en cada acción, pone el nombre del técnico (nadie puede hacerse pasar por otro) y, si se desactiva un código, esa persona sale al instante. Al recargar la página siempre se vuelve a pedir el código.
+- ✅ **Permisos por técnico (switches)**: en *Accesos*, el supervisor puede encender a cada técnico **Descargar reporte** y/o **Cargar base**. El iPad del técnico muestra al instante el botón de *Herramientas* (carpeta con engrane) con esas opciones; al apagar el switch desaparece y el servidor rechaza la siguiente acción.
 - ✅ **Botón "Generar reporte"** siempre visible para el supervisor → vista previa + **Excel** (4 hojas con gráficos), **PDF/impresión** (con logos y firmas) y **CSV**.
 
 **Diseño**
@@ -117,6 +118,7 @@ docs/capturas/        Capturas de pantalla
 ## 5. Uso diario
 
 0. **Accesos (una sola vez por persona)**: Supervisor → **Accesos** → escribe un código (o pulsa **Generar**) → **Siguiente** → nombre del técnico y tipo de acceso → **Asignar código**. Entrégale el código al técnico. Desde la misma lista puedes ver, desactivar, reactivar o eliminar códigos. Los códigos se guardan en la hoja privada **Accesos**.
+0.1. **Permisos (opcional)**: Supervisor → **Accesos** → en la columna *Permisos del técnico* enciende **Descargar reporte** o **Cargar base** para quien vaya a cubrir esa tarea. El técnico lo ve en su iPad en el botón de *Herramientas*.
 1. **Supervisor → Administración → Cargar agenda del día**: arrastra el Excel. Revisa la vista previa (pacientes detectados y modalidades) y pulsa **Cargar**. Los iPads se actualizan solos.
 2. **Técnicos**: escriben su **código**, eligen su sala (opcional) y marcan cada paciente:
    - **Asistió** → un toque.
